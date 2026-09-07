@@ -38,6 +38,16 @@ export const getOrgSigs = async () => {
     }
 };
 
+export const getRepositoryInsights = async (range = '30d') => {
+    try {
+        const response = await api.get('/organization/repositories', { params: { range } });
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching repository insights:', error);
+        throw error;
+    }
+};
+
 export const getSigTimeseries = async (sigId, range = '30d') => {
     try {
         const response = await api.get(`/sig/${sigId}/timeseries`, { params: { range } });
@@ -175,4 +185,3 @@ export const getSigContributors = async (sigId, range = '30d') => {
 };
 
 export default api;
-

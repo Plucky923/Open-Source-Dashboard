@@ -18,6 +18,7 @@ import ContributorLeaderboard from './ContributorLeaderboard';
 import ContributorStats from './ContributorStats';
 import DayDetailModal from './DayDetailModal';
 import SIGContributorModal from './SIGContributorModal';
+import RepositoryInsights from './RepositoryInsights';
 import { useToast, ToastContainer } from './Toast';
 
 const Dashboard = () => {
@@ -32,6 +33,7 @@ const Dashboard = () => {
     const [growthLoading, setGrowthLoading] = useState(false);
     const [selectedSigIds, setSelectedSigIds] = useState([]);
     const [comparisonData, setComparisonData] = useState([]);
+    const [repositoryRefreshToken, setRepositoryRefreshToken] = useState(0);
     const { toasts, addToast, removeToast } = useToast();
 
     // Modal states
@@ -145,6 +147,7 @@ const Dashboard = () => {
 
     const handleRefresh = () => {
         addToast('正在刷新数据...', 'info', 1000);
+        setRepositoryRefreshToken((current) => current + 1);
         fetchAllData();
     };
 
@@ -389,6 +392,9 @@ const Dashboard = () => {
                     />
                 </div>
             </div>
+
+            {/* Repository-level analysis follows the SIG overview */}
+            <RepositoryInsights range={range} sigs={allSigs} refreshToken={repositoryRefreshToken} />
 
             {/* Contributor Section */}
             <div className="mb-8">
