@@ -36,6 +36,13 @@ const {
     invalidateRepositoryInsightCache,
     mapRepositoryInsightRows,
 } = require('./repository_insights');
+const {
+    buildOrganizationSummaryCacheKey,
+    invalidateOrganizationSummaryCache,
+    normalizeTimestamp,
+    recordSuccessfulIngestion,
+    withDataFreshness,
+} = require('./data_freshness');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -938,6 +945,10 @@ async function runDailyIngestionJob() {
         console.log(`[aggregation] organization@${targetDateStr}: saved snapshot (id=${result.rows[0].id})`);
         console.log(`Successfully stored organization snapshot for ${ORG_NAME} on ${targetDateStr}.`);
 
+        await recordSuccessfulIngestion(pool, org.id);
+        const invalidatedSummaryCacheKeys = await invalidateOrganizationSummaryCache(redisClient, ORG_NAME);
+        console.log(`Invalidated ${invalidatedSummaryCacheKeys} organization summary cache keys.`);
+
         console.log('--- Daily Data Ingestion Job Finished Successfully ---');
 
         // 主动刷新缓存
@@ -1321,7 +1332,10 @@ cron.schedule('0 */6 * * *', runDailyIngestionJob); // Every 6 hours for testing
 
 // Helper function for security check (now simplified for single org)
 async function getMonitoredOrg() {
-    const orgResult = await pool.query("SELECT id, name FROM organizations WHERE name = $1", [ORG_NAME]);
+    const orgResult = await pool.query(
+        "SELECT id, name, last_ingestion_completed_at FROM organizations WHERE name = $1",
+        [ORG_NAME],
+    );
     return orgResult.rows[0];
 }
 
@@ -1422,7 +1436,6 @@ app.get('/api/v1/organization/timeseries', async (req, res) => {
 app.get('/api/v1/organization/summary', async (req, res) => {
     // 默认30天，允许通过查询参数更改，例如 /summary?range=7d
     const range = req.query.range || '30d';
-    const cacheKey = `org:${ORG_NAME}:summary:range:${range}`;
     const cacheTTL = 60 * 10; // 缓存10分钟
 
     try {
@@ -1430,12 +1443,17 @@ app.get('/api/v1/organization/summary', async (req, res) => {
         if (!org) {
             return res.status(404).json({ error: 'Monitored organization not found.' });
         }
+        const cacheKey = buildOrganizationSummaryCacheKey(
+            ORG_NAME,
+            range,
+            org.last_ingestion_completed_at,
+        );
 
         // 1. 检查缓存
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             console.log(`Cache hit for summary: ${cacheKey}`);
-            return res.json(JSON.parse(cachedData));
+            return res.json(withDataFreshness(JSON.parse(cachedData)));
         }
         console.log(`Cache miss for summary: ${cacheKey}. Querying DB...`);
 
@@ -1486,13 +1504,14 @@ app.get('/api/v1/organization/summary', async (req, res) => {
             active_contributors: parseInt(contributorCountResult.rows[0].unique_contributors, 10),
             days_counted: parseInt(summaryResult.rows[0].days_counted, 10),
             range_days: days, // 在响应中包含请求的范围
+            last_updated_at: normalizeTimestamp(org.last_ingestion_completed_at),
         };
 
         // 4. 存入缓存并返回
         await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(summaryData));
         console.log(`Summary data stored in cache for ${cacheKey}.`);
 
-        res.json(summaryData);
+        res.json(withDataFreshness(summaryData));
 
     } catch (error) {
         console.error(`Error fetching summary data for organization:`, error.message);

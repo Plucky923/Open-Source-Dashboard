@@ -239,6 +239,10 @@ const Dashboard = () => {
                         sigData={sigData}
                         timeseries={timeseries}
                     />
+                    <DataFreshness
+                        lastUpdatedAt={summary?.last_updated_at}
+                        status={summary?.data_status}
+                    />
                 </div>
             </div>
 
@@ -439,6 +443,61 @@ const ScopeStat = ({ label, value, unit }) => (
         </div>
     </div>
 );
+
+const DATA_UPDATED_AT_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+});
+const DATA_FRESHNESS_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+const DataFreshness = ({ lastUpdatedAt, status }) => {
+    const [currentTime, setCurrentTime] = useState(() => Date.now());
+    const timestamp = lastUpdatedAt ? new Date(lastUpdatedAt) : null;
+    const hasValidTimestamp = timestamp && !Number.isNaN(timestamp.getTime());
+    const displayTime = hasValidTimestamp ? DATA_UPDATED_AT_FORMATTER.format(timestamp) : null;
+    const staleAt = hasValidTimestamp ? timestamp.getTime() + DATA_FRESHNESS_THRESHOLD_MS : null;
+    const isStale = status === 'stale' || (staleAt !== null && currentTime > staleAt);
+    const label = isStale ? '数据可能延迟，更新于' : '数据更新于';
+
+    useEffect(() => {
+        if (staleAt === null || currentTime > staleAt) {
+            return undefined;
+        }
+
+        const timerId = window.setTimeout(
+            () => setCurrentTime(Date.now()),
+            Math.min(staleAt - Date.now() + 1, MAX_TIMER_DELAY_MS),
+        );
+
+        return () => window.clearTimeout(timerId);
+    }, [currentTime, staleAt]);
+
+    return (
+        <div
+            className="flex w-full items-center justify-end gap-2 whitespace-nowrap text-xs text-gray-400"
+            title={displayTime ? `最近一次成功生成组织数据快照：${displayTime}（北京时间）` : '当前没有可用的数据更新时间'}
+        >
+            <span
+                className={`h-2 w-2 rounded-full ${displayTime ? (isStale ? 'bg-amber-400' : 'bg-emerald-400') : 'bg-gray-500'}`}
+                aria-hidden="true"
+            />
+            {displayTime ? (
+                <span>
+                    {label}{' '}
+                    <time dateTime={lastUpdatedAt} className={isStale ? 'text-amber-300' : 'text-gray-300'}>
+                        {displayTime}
+                    </time>
+                </span>
+            ) : <span>暂无数据更新时间</span>}
+        </div>
+    );
+};
 
 const SummaryCard = ({ title, value, icon, color, subtext }) => {
     const colorClasses = {

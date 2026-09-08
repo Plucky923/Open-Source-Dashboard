@@ -6,7 +6,8 @@ SET client_encoding = 'UTF8';
 CREATE TABLE organizations (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_ingestion_completed_at TIMESTAMPTZ
 );
 
 -- Table: special_interest_groups
