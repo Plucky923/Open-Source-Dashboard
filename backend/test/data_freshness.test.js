@@ -8,6 +8,7 @@ const {
     invalidateOrganizationSummaryCache,
     normalizeTimestamp,
     recordSuccessfulIngestion,
+    withDataFreshness,
 } = require('../data_freshness');
 
 test('normalizes a valid data update time to ISO 8601', () => {
@@ -46,6 +47,23 @@ test('marks data older than twelve hours as stale', () => {
         last_updated_at: updatedAt.toISOString(),
         data_status: 'stale',
     });
+});
+
+test('recomputes freshness for the same cached summary on every response', () => {
+    const cachedSummary = {
+        new_prs: 12,
+        last_updated_at: '2026-09-08T00:00:00.000Z',
+    };
+
+    assert.equal(
+        withDataFreshness(cachedSummary, new Date('2026-09-08T12:00:00.000Z')).data_status,
+        'fresh',
+    );
+    assert.equal(
+        withDataFreshness(cachedSummary, new Date('2026-09-08T12:00:00.001Z')).data_status,
+        'stale',
+    );
+    assert.equal(cachedSummary.data_status, undefined);
 });
 
 test('records freshness only through the successful ingestion marker', async () => {

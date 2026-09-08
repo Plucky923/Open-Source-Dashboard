@@ -30,6 +30,13 @@ function buildDataFreshness(lastUpdatedAt, now = new Date()) {
     };
 }
 
+function withDataFreshness(summaryData, now = new Date()) {
+    return {
+        ...summaryData,
+        ...buildDataFreshness(summaryData.last_updated_at, now),
+    };
+}
+
 async function recordSuccessfulIngestion(queryable, orgId) {
     const result = await queryable.query(RECORD_SUCCESSFUL_INGESTION_SQL, [orgId]);
     return normalizeTimestamp(result.rows[0]?.last_ingestion_completed_at);
@@ -58,4 +65,5 @@ module.exports = {
     invalidateOrganizationSummaryCache,
     normalizeTimestamp,
     recordSuccessfulIngestion,
+    withDataFreshness,
 };

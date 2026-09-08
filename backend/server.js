@@ -37,9 +37,10 @@ const {
     mapRepositoryInsightRows,
 } = require('./repository_insights');
 const {
-    buildDataFreshness,
     invalidateOrganizationSummaryCache,
+    normalizeTimestamp,
     recordSuccessfulIngestion,
+    withDataFreshness,
 } = require('./data_freshness');
 
 const app = express();
@@ -1444,7 +1445,7 @@ app.get('/api/v1/organization/summary', async (req, res) => {
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             console.log(`Cache hit for summary: ${cacheKey}`);
-            return res.json(JSON.parse(cachedData));
+            return res.json(withDataFreshness(JSON.parse(cachedData)));
         }
         console.log(`Cache miss for summary: ${cacheKey}. Querying DB...`);
 
@@ -1497,14 +1498,14 @@ app.get('/api/v1/organization/summary', async (req, res) => {
             active_contributors: parseInt(contributorCountResult.rows[0].unique_contributors, 10),
             days_counted: parseInt(summaryResult.rows[0].days_counted, 10),
             range_days: days, // 在响应中包含请求的范围
-            ...buildDataFreshness(summaryResult.rows[0].last_updated_at),
+            last_updated_at: normalizeTimestamp(summaryResult.rows[0].last_updated_at),
         };
 
         // 4. 存入缓存并返回
         await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(summaryData));
         console.log(`Summary data stored in cache for ${cacheKey}.`);
 
-        res.json(summaryData);
+        res.json(withDataFreshness(summaryData));
 
     } catch (error) {
         console.error(`Error fetching summary data for organization:`, error.message);
