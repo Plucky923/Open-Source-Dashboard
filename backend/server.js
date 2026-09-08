@@ -36,6 +36,7 @@ const {
     invalidateRepositoryInsightCache,
     mapRepositoryInsightRows,
 } = require('./repository_insights');
+const { buildDataFreshness } = require('./data_freshness');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1422,7 +1423,7 @@ app.get('/api/v1/organization/timeseries', async (req, res) => {
 app.get('/api/v1/organization/summary', async (req, res) => {
     // 默认30天，允许通过查询参数更改，例如 /summary?range=7d
     const range = req.query.range || '30d';
-    const cacheKey = `org:${ORG_NAME}:summary:range:${range}`;
+    const cacheKey = `org:${ORG_NAME}:summary:v2:range:${range}`;
     const cacheTTL = 60 * 10; // 缓存10分钟
 
     try {
@@ -1455,6 +1456,8 @@ app.get('/api/v1/organization/summary', async (req, res) => {
                  WHERE org_id = $1 AND is_in_organization = TRUE) as organization_repositories,
                 (SELECT COUNT(*) FROM repositories
                  WHERE org_id = $1 AND is_in_organization = TRUE AND sig_id IS NOT NULL) as tracked_repositories,
+                (SELECT MAX(freshness.created_at) FROM activity_snapshots freshness
+                 WHERE freshness.org_id = $1) as last_updated_at,
                 -- 为了调试和验证，可以返回统计了多少天的数据
                 COUNT(*) as days_counted 
              FROM activity_snapshots
@@ -1486,6 +1489,7 @@ app.get('/api/v1/organization/summary', async (req, res) => {
             active_contributors: parseInt(contributorCountResult.rows[0].unique_contributors, 10),
             days_counted: parseInt(summaryResult.rows[0].days_counted, 10),
             range_days: days, // 在响应中包含请求的范围
+            ...buildDataFreshness(summaryResult.rows[0].last_updated_at),
         };
 
         // 4. 存入缓存并返回
