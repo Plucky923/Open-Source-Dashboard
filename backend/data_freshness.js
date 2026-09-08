@@ -37,6 +37,14 @@ function withDataFreshness(summaryData, now = new Date()) {
     };
 }
 
+function buildOrganizationSummaryCacheKey(organizationName, range, lastUpdatedAt) {
+    const normalizedTimestamp = normalizeTimestamp(lastUpdatedAt);
+    const generation = normalizedTimestamp
+        ? String(new Date(normalizedTimestamp).getTime())
+        : 'missing';
+    return `org:${organizationName}:summary:v4:generation:${generation}:range:${range}`;
+}
+
 async function recordSuccessfulIngestion(queryable, orgId) {
     const result = await queryable.query(RECORD_SUCCESSFUL_INGESTION_SQL, [orgId]);
     return normalizeTimestamp(result.rows[0]?.last_ingestion_completed_at);
@@ -61,6 +69,7 @@ async function invalidateOrganizationSummaryCache(redisClient, organizationName)
 module.exports = {
     DATA_FRESHNESS_THRESHOLD_MS,
     RECORD_SUCCESSFUL_INGESTION_SQL,
+    buildOrganizationSummaryCacheKey,
     buildDataFreshness,
     invalidateOrganizationSummaryCache,
     normalizeTimestamp,

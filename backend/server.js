@@ -37,6 +37,7 @@ const {
     mapRepositoryInsightRows,
 } = require('./repository_insights');
 const {
+    buildOrganizationSummaryCacheKey,
     invalidateOrganizationSummaryCache,
     normalizeTimestamp,
     recordSuccessfulIngestion,
@@ -1331,7 +1332,10 @@ cron.schedule('0 */6 * * *', runDailyIngestionJob); // Every 6 hours for testing
 
 // Helper function for security check (now simplified for single org)
 async function getMonitoredOrg() {
-    const orgResult = await pool.query("SELECT id, name FROM organizations WHERE name = $1", [ORG_NAME]);
+    const orgResult = await pool.query(
+        "SELECT id, name, last_ingestion_completed_at FROM organizations WHERE name = $1",
+        [ORG_NAME],
+    );
     return orgResult.rows[0];
 }
 
@@ -1432,7 +1436,6 @@ app.get('/api/v1/organization/timeseries', async (req, res) => {
 app.get('/api/v1/organization/summary', async (req, res) => {
     // 默认30天，允许通过查询参数更改，例如 /summary?range=7d
     const range = req.query.range || '30d';
-    const cacheKey = `org:${ORG_NAME}:summary:v3:range:${range}`;
     const cacheTTL = 60 * 10; // 缓存10分钟
 
     try {
@@ -1440,6 +1443,11 @@ app.get('/api/v1/organization/summary', async (req, res) => {
         if (!org) {
             return res.status(404).json({ error: 'Monitored organization not found.' });
         }
+        const cacheKey = buildOrganizationSummaryCacheKey(
+            ORG_NAME,
+            range,
+            org.last_ingestion_completed_at,
+        );
 
         // 1. 检查缓存
         const cachedData = await redisClient.get(cacheKey);
@@ -1465,8 +1473,6 @@ app.get('/api/v1/organization/summary', async (req, res) => {
                  WHERE org_id = $1 AND is_in_organization = TRUE) as organization_repositories,
                 (SELECT COUNT(*) FROM repositories
                  WHERE org_id = $1 AND is_in_organization = TRUE AND sig_id IS NOT NULL) as tracked_repositories,
-                (SELECT freshness.last_ingestion_completed_at FROM organizations freshness
-                 WHERE freshness.id = $1) as last_updated_at,
                 -- 为了调试和验证，可以返回统计了多少天的数据
                 COUNT(*) as days_counted 
              FROM activity_snapshots
@@ -1498,7 +1504,7 @@ app.get('/api/v1/organization/summary', async (req, res) => {
             active_contributors: parseInt(contributorCountResult.rows[0].unique_contributors, 10),
             days_counted: parseInt(summaryResult.rows[0].days_counted, 10),
             range_days: days, // 在响应中包含请求的范围
-            last_updated_at: normalizeTimestamp(summaryResult.rows[0].last_updated_at),
+            last_updated_at: normalizeTimestamp(org.last_ingestion_completed_at),
         };
 
         // 4. 存入缓存并返回

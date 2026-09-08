@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
     DATA_FRESHNESS_THRESHOLD_MS,
     RECORD_SUCCESSFUL_INGESTION_SQL,
+    buildOrganizationSummaryCacheKey,
     buildDataFreshness,
     invalidateOrganizationSummaryCache,
     normalizeTimestamp,
@@ -64,6 +65,23 @@ test('recomputes freshness for the same cached summary on every response', () =>
         'stale',
     );
     assert.equal(cachedSummary.data_status, undefined);
+});
+
+test('changes summary cache generation after successful ingestion', () => {
+    const missingKey = buildOrganizationSummaryCacheKey('example-org', '30d', null);
+    const oldKey = buildOrganizationSummaryCacheKey(
+        'example-org',
+        '30d',
+        '2026-09-08T00:00:00.000Z',
+    );
+    const newKey = buildOrganizationSummaryCacheKey(
+        'example-org',
+        '30d',
+        '2026-09-08T06:00:00.000Z',
+    );
+
+    assert.equal(missingKey, 'org:example-org:summary:v4:generation:missing:range:30d');
+    assert.notEqual(oldKey, newKey);
 });
 
 test('records freshness only through the successful ingestion marker', async () => {
