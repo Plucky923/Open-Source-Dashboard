@@ -31,6 +31,11 @@ const {
     storeContributorActivities: persistContributorActivities,
 } = require('./contributor_api_stats');
 const { collectAndPersistRepoApiStats } = require('./repo_api_ingestion');
+const {
+    REPOSITORY_INSIGHTS_SQL,
+    invalidateRepositoryInsightCache,
+    mapRepositoryInsightRows,
+} = require('./repository_insights');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -721,6 +726,9 @@ async function refreshCache() {
             return;
         }
 
+        const invalidatedRepositoryCacheKeys = await invalidateRepositoryInsightCache(redisClient, ORG_NAME);
+        console.log(`Invalidated ${invalidatedRepositoryCacheKeys} repository insight cache keys`);
+
         // 刷新组织时间序列数据（30天）
         const range = '30d';
         const days = 30;
@@ -1329,6 +1337,39 @@ app.get('/api/v1/organization/sigs', async (req, res) => {
         res.json(sigsResult.rows);
     } catch (error) {
         console.error('Error fetching SIGs:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// GET /api/v1/organization/repositories - Repository-level activity in a selected range
+app.get('/api/v1/organization/repositories', async (req, res) => {
+    const range = req.query.range || '30d';
+    const cacheKey = `org:${ORG_NAME}:repositories:range:${range}`;
+    const cacheTTL = 60 * 10;
+
+    try {
+        const org = await getMonitoredOrg();
+        if (!org) {
+            return res.status(404).json({ error: 'Monitored organization not found.' });
+        }
+
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData));
+        }
+
+        const { startDateStr } = parseRange(range);
+        const result = await pool.query(REPOSITORY_INSIGHTS_SQL, [org.id, startDateStr]);
+        const repositories = mapRepositoryInsightRows(result.rows, ORG_NAME);
+        const responseData = {
+            range,
+            repositories,
+        };
+
+        await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(responseData));
+        res.json(responseData);
+    } catch (error) {
+        console.error('Error fetching repository insights:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });

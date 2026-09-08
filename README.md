@@ -316,6 +316,7 @@ npm run lint
 | 接口 | 描述 |
 |------|------|
 | `GET /api/v1/organization/sigs` | 获取所有 SIG 列表 |
+| `GET /api/v1/organization/repositories` | 获取指定时间范围内的仓库级活动汇总 |
 | `GET /api/v1/organization/timeseries` | 获取组织时间序列数据 |
 | `GET /api/v1/sig/:sigId/timeseries` | 获取 SIG 时间序列数据 |
 | `GET /api/v1/organization/latest-activity` | 获取最新活动列表 |
