@@ -11,7 +11,7 @@
 - `range=7d`、`range=30d`、`range=90d`：最近 N 天。
 - `range=all`：全部历史数据，仅适用于下文列出的接口。
 
-当前实现中，`all` 可用于组织汇总、仓库、时间序列、聚合时间序列，SIG Commit/API/聚合时间序列、贡献者和 SIG 对比接口。SIG `summary`、基础 `timeseries`、增长分析以及 CSV/Excel 导出应传 `<days>d`，否则不能得到“全部历史”语义。
+当前实现中，`all` 可用于组织汇总、仓库和基础时间序列，以及 SIG Commit/API/聚合时间序列、贡献者和 SIG 对比接口。组织聚合时间序列、SIG `summary`、SIG 基础 `timeseries`、增长分析以及 CSV/Excel 导出应传 `<days>d`，否则不能得到“全部历史”语义。
 
 聚合趋势、SIG 对比和导出接口还可使用 `granularity=day|week|month` 控制时间粒度。
 
@@ -103,11 +103,18 @@ Bot 账号不会进入人类贡献者指标，但 Bot 提交仍计入组织、SI
 curl -L 'http://localhost:3000/api/v1/export/csv?range=30d' -o dashboard.csv
 ```
 
-CSV 和 Excel 接口支持：
+CSV 接口支持：
 
 - `type=org|sig|comparison`
 - `range=<days>d`
-- `sigIds=1,2`，用于 SIG 或对比导出
+- `sigIds=1,2`：`sig` 使用第一个 ID，`comparison` 使用全部 ID
+- `granularity=day|week|month`：仅 `org` 和 `sig` 会执行周/月聚合；`comparison` 始终导出日粒度数据
+
+Excel 接口支持：
+
+- `type=org|comparison`；当前不支持单独的 `type=sig`
+- `range=<days>d`
+- `sigIds=1,2`：用于 `comparison`
 - `granularity=day|week|month`
 
 PDF 接口不是数据查询接口。前端以 JSON 请求体提交 `type`、`range`、`sigIds`、`summary`、`growthData`、`sigData`、`contributors` 和 `timeseries` 等已加载数据，再由后端排版生成文件。

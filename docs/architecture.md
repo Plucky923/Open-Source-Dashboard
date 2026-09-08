@@ -58,7 +58,7 @@ GitHub Repository Custom Property `osd_sig` 是仓库 SIG 归属的唯一来源�
 ## Commit 与贡献者口径
 
 - Commit 数据来自每个仓库的默认分支历史，并按本地日期分桶到统计区间。
-- Merge Commit 计入 Commit 总数；代码行使用 GitHub 返回的该 Commit 汇总增删行数，不重复累计父提交的 diff。
+- Merge Commit 计入 Commit 总数，但其增加行数和删除行数固定记为 0，避免与合入的普通 Commit 重复计算代码行。
 - Bot 提交计入仓库、SIG 和组织的 Commit 与代码行活动统计。
 - Bot 账号不计入人类贡献者人数、排行榜等贡献者指标。
 - 无法关联 GitHub 用户的 Commit 仍计入活动量，但不会归属到某个贡献者账号。
