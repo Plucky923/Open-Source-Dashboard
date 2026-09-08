@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
     REPOSITORY_INSIGHTS_SQL,
+    invalidateRepositoryInsightCache,
     mapRepositoryInsightRow,
 } = require('../repository_insights');
 
@@ -72,4 +73,33 @@ test('does not classify code-line totals without a PR, issue, or commit as repos
     }, 'example-org');
 
     assert.equal(result.is_active, false);
+});
+
+test('invalidates repository insight caches for every range after ingestion', async () => {
+    const scannedOptions = [];
+    const deletedKeys = [];
+    const redisClient = {
+        async *scanIterator(options) {
+            scannedOptions.push(options);
+            yield 'org:example-org:repositories:range:7d';
+            yield 'org:example-org:repositories:range:30d';
+            yield 'org:example-org:repositories:range:all';
+        },
+        async del(keys) {
+            deletedKeys.push(...keys);
+        },
+    };
+
+    const invalidatedCount = await invalidateRepositoryInsightCache(redisClient, 'example-org');
+
+    assert.deepEqual(scannedOptions, [{
+        MATCH: 'org:example-org:repositories:range:*',
+        COUNT: 100,
+    }]);
+    assert.deepEqual(deletedKeys, [
+        'org:example-org:repositories:range:7d',
+        'org:example-org:repositories:range:30d',
+        'org:example-org:repositories:range:all',
+    ]);
+    assert.equal(invalidatedCount, 3);
 });

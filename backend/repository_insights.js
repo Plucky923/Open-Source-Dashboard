@@ -129,8 +129,27 @@ function mapRepositoryInsightRows(rows, organizationName) {
     return rows.map((row) => mapRepositoryInsightRow(row, organizationName));
 }
 
+async function invalidateRepositoryInsightCache(redisClient, organizationName) {
+    const pattern = `org:${organizationName}:repositories:range:*`;
+    const cacheKeys = [];
+
+    for await (const key of redisClient.scanIterator({
+        MATCH: pattern,
+        COUNT: 100,
+    })) {
+        cacheKeys.push(key);
+    }
+
+    if (cacheKeys.length > 0) {
+        await redisClient.del(cacheKeys);
+    }
+
+    return cacheKeys.length;
+}
+
 module.exports = {
     REPOSITORY_INSIGHTS_SQL,
+    invalidateRepositoryInsightCache,
     mapRepositoryInsightRow,
     mapRepositoryInsightRows,
 };

@@ -33,6 +33,7 @@ const {
 const { collectAndPersistRepoApiStats } = require('./repo_api_ingestion');
 const {
     REPOSITORY_INSIGHTS_SQL,
+    invalidateRepositoryInsightCache,
     mapRepositoryInsightRows,
 } = require('./repository_insights');
 
@@ -724,6 +725,9 @@ async function refreshCache() {
             console.log('Organization not found. Skipping cache refresh.');
             return;
         }
+
+        const invalidatedRepositoryCacheKeys = await invalidateRepositoryInsightCache(redisClient, ORG_NAME);
+        console.log(`Invalidated ${invalidatedRepositoryCacheKeys} repository insight cache keys`);
 
         // 刷新组织时间序列数据（30天）
         const range = '30d';
