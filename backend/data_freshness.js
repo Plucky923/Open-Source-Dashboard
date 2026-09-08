@@ -1,5 +1,10 @@
 const DATA_FRESHNESS_THRESHOLD_MS = 12 * 60 * 60 * 1000;
 
+const RECORD_SUCCESSFUL_INGESTION_SQL = `UPDATE organizations
+SET last_ingestion_completed_at = NOW()
+WHERE id = $1
+RETURNING last_ingestion_completed_at`;
+
 function normalizeTimestamp(value) {
     if (!value) {
         return null;
@@ -25,8 +30,15 @@ function buildDataFreshness(lastUpdatedAt, now = new Date()) {
     };
 }
 
+async function recordSuccessfulIngestion(queryable, orgId) {
+    const result = await queryable.query(RECORD_SUCCESSFUL_INGESTION_SQL, [orgId]);
+    return normalizeTimestamp(result.rows[0]?.last_ingestion_completed_at);
+}
+
 module.exports = {
     DATA_FRESHNESS_THRESHOLD_MS,
+    RECORD_SUCCESSFUL_INGESTION_SQL,
     buildDataFreshness,
     normalizeTimestamp,
+    recordSuccessfulIngestion,
 };
