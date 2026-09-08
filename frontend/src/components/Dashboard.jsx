@@ -337,15 +337,17 @@ const Dashboard = () => {
             </div>
 
             {/* Multi-SIG Comparison Chart */}
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl mb-8" style={{ height: '500px' }}>
-                <h3 className="text-lg font-semibold mb-4">多 SIG 趋势对比</h3>
-                <MultiSIGComparisonChart
-                    sigs={comparisonData}
-                    selectedSigIds={selectedSigIds}
-                    onSigSelectionChange={setSelectedSigIds}
-                    range={range}
-                    granularity={granularity}
-                />
+            <div className="flex h-[500px] flex-col rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-xl mb-8">
+                <h3 className="mb-4 shrink-0 text-lg font-semibold">多 SIG 趋势对比</h3>
+                <div className="min-h-0 flex-1">
+                    <MultiSIGComparisonChart
+                        sigs={comparisonData}
+                        selectedSigIds={selectedSigIds}
+                        onSigSelectionChange={setSelectedSigIds}
+                        range={range}
+                        granularity={granularity}
+                    />
+                </div>
             </div>
 
             {/* Secondary Charts Grid */}
