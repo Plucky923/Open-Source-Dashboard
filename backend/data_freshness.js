@@ -35,10 +35,27 @@ async function recordSuccessfulIngestion(queryable, orgId) {
     return normalizeTimestamp(result.rows[0]?.last_ingestion_completed_at);
 }
 
+async function invalidateOrganizationSummaryCache(redisClient, organizationName) {
+    const cacheKeys = [];
+    for await (const key of redisClient.scanIterator({
+        MATCH: `org:${organizationName}:summary:*`,
+        COUNT: 100,
+    })) {
+        cacheKeys.push(key);
+    }
+
+    if (cacheKeys.length > 0) {
+        await redisClient.del(cacheKeys);
+    }
+
+    return cacheKeys.length;
+}
+
 module.exports = {
     DATA_FRESHNESS_THRESHOLD_MS,
     RECORD_SUCCESSFUL_INGESTION_SQL,
     buildDataFreshness,
+    invalidateOrganizationSummaryCache,
     normalizeTimestamp,
     recordSuccessfulIngestion,
 };

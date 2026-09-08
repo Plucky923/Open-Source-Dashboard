@@ -36,7 +36,11 @@ const {
     invalidateRepositoryInsightCache,
     mapRepositoryInsightRows,
 } = require('./repository_insights');
-const { buildDataFreshness, recordSuccessfulIngestion } = require('./data_freshness');
+const {
+    buildDataFreshness,
+    invalidateOrganizationSummaryCache,
+    recordSuccessfulIngestion,
+} = require('./data_freshness');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -940,6 +944,8 @@ async function runDailyIngestionJob() {
         console.log(`Successfully stored organization snapshot for ${ORG_NAME} on ${targetDateStr}.`);
 
         await recordSuccessfulIngestion(pool, org.id);
+        const invalidatedSummaryCacheKeys = await invalidateOrganizationSummaryCache(redisClient, ORG_NAME);
+        console.log(`Invalidated ${invalidatedSummaryCacheKeys} organization summary cache keys.`);
 
         console.log('--- Daily Data Ingestion Job Finished Successfully ---');
 

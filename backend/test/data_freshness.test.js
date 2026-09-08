@@ -5,6 +5,7 @@ const {
     DATA_FRESHNESS_THRESHOLD_MS,
     RECORD_SUCCESSFUL_INGESTION_SQL,
     buildDataFreshness,
+    invalidateOrganizationSummaryCache,
     normalizeTimestamp,
     recordSuccessfulIngestion,
 } = require('../data_freshness');
@@ -75,4 +76,32 @@ test('propagates failures while recording successful ingestion', async () => {
     };
 
     await assert.rejects(recordSuccessfulIngestion(queryable, 42), expectedError);
+});
+
+test('invalidates every organization summary cache after ingestion', async () => {
+    const scannedOptions = [];
+    const deletedKeys = [];
+    const redisClient = {
+        async *scanIterator(options) {
+            scannedOptions.push(options);
+            yield 'org:example-org:summary:v2:range:7d';
+            yield 'org:example-org:summary:v3:range:30d';
+        },
+        async del(keys) {
+            deletedKeys.push(...keys);
+        },
+    };
+
+    assert.equal(
+        await invalidateOrganizationSummaryCache(redisClient, 'example-org'),
+        2,
+    );
+    assert.deepEqual(scannedOptions, [{
+        MATCH: 'org:example-org:summary:*',
+        COUNT: 100,
+    }]);
+    assert.deepEqual(deletedKeys, [
+        'org:example-org:summary:v2:range:7d',
+        'org:example-org:summary:v3:range:30d',
+    ]);
 });
