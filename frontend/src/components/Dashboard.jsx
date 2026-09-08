@@ -451,13 +451,30 @@ const DATA_UPDATED_AT_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
     minute: '2-digit',
     hour12: false,
 });
+const DATA_FRESHNESS_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const DataFreshness = ({ lastUpdatedAt, status }) => {
+    const [currentTime, setCurrentTime] = useState(() => Date.now());
     const timestamp = lastUpdatedAt ? new Date(lastUpdatedAt) : null;
     const hasValidTimestamp = timestamp && !Number.isNaN(timestamp.getTime());
     const displayTime = hasValidTimestamp ? DATA_UPDATED_AT_FORMATTER.format(timestamp) : null;
-    const isStale = status === 'stale';
+    const staleAt = hasValidTimestamp ? timestamp.getTime() + DATA_FRESHNESS_THRESHOLD_MS : null;
+    const isStale = status === 'stale' || (staleAt !== null && currentTime > staleAt);
     const label = isStale ? '数据可能延迟，更新于' : '数据更新于';
+
+    useEffect(() => {
+        if (staleAt === null || currentTime > staleAt) {
+            return undefined;
+        }
+
+        const timerId = window.setTimeout(
+            () => setCurrentTime(Date.now()),
+            Math.min(staleAt - Date.now() + 1, MAX_TIMER_DELAY_MS),
+        );
+
+        return () => window.clearTimeout(timerId);
+    }, [currentTime, staleAt]);
 
     return (
         <div
