@@ -1,0 +1,73 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+    buildComparisonPeriods,
+    calculateGrowthMetrics,
+    formatGrowthMetrics,
+    getRangeDays,
+} = require('../growth_analysis');
+
+test('builds adjacent, equal seven-day comparison windows from the latest snapshot', () => {
+    assert.deepEqual(
+        buildComparisonPeriods('7d', '2024-09-05', '2026-09-08'),
+        {
+            comparison_available: true,
+            reason: null,
+            current: { start: '2026-09-02', end: '2026-09-08' },
+            previous: { start: '2026-08-26', end: '2026-09-01' },
+        },
+    );
+});
+
+test('builds adjacent, equal thirty-day comparison windows across month boundaries', () => {
+    const periods = buildComparisonPeriods('30d', '2024-09-05', '2026-09-08');
+
+    assert.deepEqual(periods.current, { start: '2026-08-10', end: '2026-09-08' });
+    assert.deepEqual(periods.previous, { start: '2026-07-11', end: '2026-08-09' });
+});
+
+test('uses the complete data bounds and disables comparison for all time', () => {
+    assert.deepEqual(
+        buildComparisonPeriods('all', '2024-09-05', '2026-09-08'),
+        {
+            comparison_available: false,
+            reason: 'unbounded_range',
+            current: { start: '2024-09-05', end: '2026-09-08' },
+            previous: null,
+        },
+    );
+});
+
+test('returns a no-data window when no snapshots exist', () => {
+    assert.deepEqual(
+        buildComparisonPeriods('30d', null, null),
+        {
+            comparison_available: false,
+            reason: 'no_data',
+            current: { start: null, end: null },
+            previous: null,
+        },
+    );
+});
+
+test('supports leap-day date arithmetic and defaults unknown ranges to thirty days', () => {
+    assert.equal(getRangeDays('unknown'), 30);
+    assert.deepEqual(
+        buildComparisonPeriods('7d', '2024-01-01', '2024-03-01').current,
+        { start: '2024-02-24', end: '2024-03-01' },
+    );
+});
+
+test('normalizes database metrics and calculates growth', () => {
+    const current = formatGrowthMetrics({ new_prs: '20', new_issues: '5', new_commits: '0' });
+    const previous = formatGrowthMetrics({ new_prs: '10', new_issues: '0', new_commits: '0' });
+
+    assert.deepEqual(calculateGrowthMetrics(current, previous), {
+        prs: 100,
+        issues: 100,
+        commits: 0,
+        lines_added: 0,
+        lines_deleted: 0,
+    });
+});
