@@ -58,21 +58,32 @@ function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate, sn
     const currentStart = addDays(latestDate, -(days - 1));
     const previousEnd = addDays(currentStart, -1);
     const previousStart = addDays(previousEnd, -(days - 1));
+    const retainedCurrentStart = firstDate && firstDate > currentStart ? firstDate : currentStart;
+
+    if (availableDates) {
+        for (let date = retainedCurrentStart; date <= latestDate; date = addDays(date, 1)) {
+            if (!availableDates.has(date)) {
+                return {
+                    comparison_available: false,
+                    reason: 'incomplete_current_period',
+                    current: { start: null, end: null },
+                    previous: null,
+                };
+            }
+        }
+    }
 
     if (!firstDate || firstDate > previousStart) {
         return {
             comparison_available: false,
             reason: 'insufficient_history',
-            current: {
-                start: firstDate && firstDate > currentStart ? firstDate : currentStart,
-                end: latestDate,
-            },
+            current: { start: retainedCurrentStart, end: latestDate },
             previous: null,
         };
     }
 
     if (availableDates) {
-        for (let date = previousStart; date <= latestDate; date = addDays(date, 1)) {
+        for (let date = previousStart; date <= previousEnd; date = addDays(date, 1)) {
             if (!availableDates.has(date)) {
                 return {
                     comparison_available: false,

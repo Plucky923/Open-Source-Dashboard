@@ -2158,21 +2158,23 @@ app.get('/api/v1/organization/growth-analysis', async (req, res) => {
         }
         console.log(`Cache miss for ${cacheKey}. Querying DB...`);
 
-        const currentResult = await pool.query(
-            `SELECT 
-                COALESCE(SUM(new_prs), 0) as new_prs,
-                COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
-                COALESCE(SUM(new_issues), 0) as new_issues,
-                COALESCE(SUM(closed_issues), 0) as closed_issues,
-                COALESCE(SUM(new_commits), 0) as new_commits,
-                COALESCE(SUM(lines_added), 0) as lines_added,
-                COALESCE(SUM(lines_deleted), 0) as lines_deleted
-             FROM activity_snapshots
-             WHERE org_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
-            [org.id, periods.current.start, periods.current.end]
-        );
-
-        const current = formatGrowthMetrics(currentResult.rows[0]);
+        let current = null;
+        if (hasCompletePeriodDates(periods.current)) {
+            const currentResult = await pool.query(
+                `SELECT
+                    COALESCE(SUM(new_prs), 0) as new_prs,
+                    COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
+                    COALESCE(SUM(new_issues), 0) as new_issues,
+                    COALESCE(SUM(closed_issues), 0) as closed_issues,
+                    COALESCE(SUM(new_commits), 0) as new_commits,
+                    COALESCE(SUM(lines_added), 0) as lines_added,
+                    COALESCE(SUM(lines_deleted), 0) as lines_deleted
+                 FROM activity_snapshots
+                 WHERE org_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
+                [org.id, periods.current.start, periods.current.end]
+            );
+            current = formatGrowthMetrics(currentResult.rows[0]);
+        }
         let previous = null;
         let growth = null;
 
@@ -2259,21 +2261,23 @@ app.get('/api/v1/sig/:sigId/growth-analysis', async (req, res) => {
         }
         console.log(`Cache miss for ${cacheKey}. Querying DB...`);
 
-        const currentResult = await pool.query(
-            `SELECT 
-                COALESCE(SUM(new_prs), 0) as new_prs,
-                COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
-                COALESCE(SUM(new_issues), 0) as new_issues,
-                COALESCE(SUM(closed_issues), 0) as closed_issues,
-                COALESCE(SUM(new_commits), 0) as new_commits,
-                COALESCE(SUM(lines_added), 0) as lines_added,
-                COALESCE(SUM(lines_deleted), 0) as lines_deleted
-             FROM sig_snapshots
-             WHERE sig_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
-            [sigId, periods.current.start, periods.current.end]
-        );
-
-        const current = formatGrowthMetrics(currentResult.rows[0]);
+        let current = null;
+        if (hasCompletePeriodDates(periods.current)) {
+            const currentResult = await pool.query(
+                `SELECT
+                    COALESCE(SUM(new_prs), 0) as new_prs,
+                    COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
+                    COALESCE(SUM(new_issues), 0) as new_issues,
+                    COALESCE(SUM(closed_issues), 0) as closed_issues,
+                    COALESCE(SUM(new_commits), 0) as new_commits,
+                    COALESCE(SUM(lines_added), 0) as lines_added,
+                    COALESCE(SUM(lines_deleted), 0) as lines_deleted
+                 FROM sig_snapshots
+                 WHERE sig_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
+                [sigId, periods.current.start, periods.current.end]
+            );
+            current = formatGrowthMetrics(currentResult.rows[0]);
+        }
         let previous = null;
         let growth = null;
 
@@ -2744,7 +2748,9 @@ app.post('/api/v1/export/pdf', async (req, res) => {
             doc.fontSize(11);
 
             if (!hasCompletePeriodDates(growthData.period.current)) {
-                doc.text('暂无数据，无法进行周期对比');
+                doc.text(growthData.comparison_unavailable_reason === 'incomplete_current_period'
+                    ? '当前周期数据不完整，暂不展示指标或环比'
+                    : '暂无数据，无法进行周期对比');
             } else {
                 doc.text(`当前周期: ${growthData.period.current.start} 至 ${growthData.period.current.end}`);
                 if (growthData.period.current.metrics) {

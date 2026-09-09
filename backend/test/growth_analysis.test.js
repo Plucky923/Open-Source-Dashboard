@@ -103,9 +103,24 @@ test('allows comparison when history begins on the previous window boundary', ()
     );
 });
 
-test('disables comparison when either window contains an internal gap', () => {
+test('omits current metrics when the current window contains an internal gap', () => {
     const snapshotDates = buildDateRange('2026-07-11', '2026-09-08')
         .filter(date => date !== '2026-08-15');
+
+    assert.deepEqual(
+        buildComparisonPeriods('30d', '2026-07-11', '2026-09-08', snapshotDates),
+        {
+            comparison_available: false,
+            reason: 'incomplete_current_period',
+            current: { start: null, end: null },
+            previous: null,
+        },
+    );
+});
+
+test('keeps a complete current window when only the previous window has a gap', () => {
+    const snapshotDates = buildDateRange('2026-07-11', '2026-09-08')
+        .filter(date => date !== '2026-08-01');
 
     assert.deepEqual(
         buildComparisonPeriods('30d', '2026-07-11', '2026-09-08', snapshotDates),
