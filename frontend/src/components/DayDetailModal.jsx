@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getDayDetails } from '../services/api';
 
 const DayDetailModal = ({ date, chartType = 'prs', onClose }) => {
@@ -7,13 +7,7 @@ const DayDetailModal = ({ date, chartType = 'prs', onClose }) => {
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState(chartType === 'commits' ? 'commits' : 'prs');
 
-    useEffect(() => {
-        if (date) {
-            fetchDetails();
-        }
-    }, [date]);
-
-    const fetchDetails = async () => {
+    const fetchDetails = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
@@ -25,7 +19,13 @@ const DayDetailModal = ({ date, chartType = 'prs', onClose }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [date]);
+
+    useEffect(() => {
+        if (date) {
+            fetchDetails();
+        }
+    }, [date, fetchDetails]);
 
     // Handle escape key
     useEffect(() => {

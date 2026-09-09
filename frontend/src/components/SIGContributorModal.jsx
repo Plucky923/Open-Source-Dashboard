@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getSigContributors } from '../services/api';
 
 const SIGContributorModal = ({ sigId, sigName, range = '30d', onClose }) => {
@@ -6,13 +6,7 @@ const SIGContributorModal = ({ sigId, sigName, range = '30d', onClose }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
-        if (sigId) {
-            fetchContributors();
-        }
-    }, [sigId, range]);
-
-    const fetchContributors = async () => {
+    const fetchContributors = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
@@ -24,7 +18,13 @@ const SIGContributorModal = ({ sigId, sigName, range = '30d', onClose }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [sigId, range]);
+
+    useEffect(() => {
+        if (sigId) {
+            fetchContributors();
+        }
+    }, [sigId, fetchContributors]);
 
     // Handle escape key
     useEffect(() => {

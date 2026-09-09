@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     getOrgSummary,
     getAggregatedTimeseries,
@@ -19,7 +19,8 @@ import ContributorStats from './ContributorStats';
 import DayDetailModal from './DayDetailModal';
 import SIGContributorModal from './SIGContributorModal';
 import RepositoryInsights from './RepositoryInsights';
-import { useToast, ToastContainer } from './Toast';
+import { ToastContainer } from './Toast';
+import { useToast } from '../hooks/useToast';
 
 const Dashboard = () => {
     const [loading, setLoading] = useState(true);
@@ -49,17 +50,19 @@ const Dashboard = () => {
         { key: 'commits', label: 'Commit', name: 'Commit', color: '#10b981' }
     ];
 
-    useEffect(() => {
-        fetchAllData();
-    }, [range, granularity]);
-
-    useEffect(() => {
-        if (selectedSigIds.length > 0) {
-            fetchComparisonData();
+    const fetchGrowthData = useCallback(async () => {
+        setGrowthLoading(true);
+        try {
+            const growth = await getGrowthAnalysis('org', null, range);
+            setGrowthData(growth);
+        } catch (error) {
+            console.error("Failed to load growth data", error);
+        } finally {
+            setGrowthLoading(false);
         }
-    }, [selectedSigIds, range, granularity]);
+    }, [range]);
 
-    const fetchAllData = async () => {
+    const fetchAllData = useCallback(async () => {
         setLoading(true);
         try {
             // 1. Fetch Org Summary, Aggregated Timeseries, and SIGs
@@ -121,21 +124,9 @@ const Dashboard = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [range, granularity, fetchGrowthData, addToast]);
 
-    const fetchGrowthData = async () => {
-        setGrowthLoading(true);
-        try {
-            const growth = await getGrowthAnalysis('org', null, range);
-            setGrowthData(growth);
-        } catch (error) {
-            console.error("Failed to load growth data", error);
-        } finally {
-            setGrowthLoading(false);
-        }
-    };
-
-    const fetchComparisonData = async () => {
+    const fetchComparisonData = useCallback(async () => {
         try {
             const data = await compareSigs(selectedSigIds, range, granularity);
             setComparisonData(data);
@@ -143,7 +134,17 @@ const Dashboard = () => {
             console.error("Failed to load comparison data", error);
             addToast('对比数据加载失败', 'error');
         }
-    };
+    }, [selectedSigIds, range, granularity, addToast]);
+
+    useEffect(() => {
+        fetchAllData();
+    }, [fetchAllData]);
+
+    useEffect(() => {
+        if (selectedSigIds.length > 0) {
+            fetchComparisonData();
+        }
+    }, [selectedSigIds, fetchComparisonData]);
 
     const handleRefresh = () => {
         addToast('正在刷新数据...', 'info', 1000);
@@ -347,9 +348,6 @@ const Dashboard = () => {
                     <MultiSIGComparisonChart
                         sigs={comparisonData}
                         selectedSigIds={selectedSigIds}
-                        onSigSelectionChange={setSelectedSigIds}
-                        range={range}
-                        granularity={granularity}
                     />
                 </div>
             </div>
