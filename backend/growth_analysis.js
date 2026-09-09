@@ -47,6 +47,19 @@ function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate, sn
 
     const days = getRangeDays(range);
     if (days === null) {
+        if (availableDates) {
+            for (let date = firstDate || latestDate; date <= latestDate; date = addDays(date, 1)) {
+                if (!availableDates.has(date)) {
+                    return {
+                        comparison_available: false,
+                        reason: 'incomplete_current_period',
+                        current: { start: null, end: null },
+                        previous: null,
+                    };
+                }
+            }
+        }
+
         return {
             comparison_available: false,
             reason: 'unbounded_range',

@@ -42,12 +42,29 @@ test('builds adjacent, equal thirty-day comparison windows across month boundari
 });
 
 test('uses the complete data bounds and disables comparison for all time', () => {
+    const snapshotDates = buildDateRange('2024-09-05', '2026-09-08');
+
     assert.deepEqual(
-        buildComparisonPeriods('all', '2024-09-05', '2026-09-08'),
+        buildComparisonPeriods('all', '2024-09-05', '2026-09-08', snapshotDates),
         {
             comparison_available: false,
             reason: 'unbounded_range',
             current: { start: '2024-09-05', end: '2026-09-08' },
+            previous: null,
+        },
+    );
+});
+
+test('omits all-time totals when retained history contains a gap', () => {
+    const snapshotDates = buildDateRange('2026-09-01', '2026-09-08')
+        .filter(date => date !== '2026-09-04');
+
+    assert.deepEqual(
+        buildComparisonPeriods('all', '2026-09-01', '2026-09-08', snapshotDates),
+        {
+            comparison_available: false,
+            reason: 'incomplete_current_period',
+            current: { start: null, end: null },
             previous: null,
         },
     );
