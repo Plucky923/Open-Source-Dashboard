@@ -8,8 +8,8 @@
 
 | 组件 | 作用 |
 |------|------|
-| GitHub GraphQL API | 获取默认分支 Commit 历史及 Commit 作者数据 |
-| GitHub REST API | 获取仓库元数据、Repository Custom Properties、PR 和 Issue 数据 |
+| GitHub GraphQL API | 获取默认分支 Commit 历史；历史和定点回填时也获取 PR、Issue 与贡献者活动 |
+| GitHub REST API | 获取仓库元数据、Repository Custom Properties，以及定时采集的 PR 和 Issue 数据 |
 | Node.js + Express | 数据采集、聚合和 API 服务 |
 | PostgreSQL | 保存仓库、活动明细、聚合结果和数据更新时间 |
 | Redis | 缓存高频查询结果 |
@@ -33,6 +33,11 @@ PostgreSQL 明细数据
     ▼
 Express API ──► React 仪表板 / 数据导出
 ```
+
+采集路径会随任务类型变化：
+
+- 定时采集：Commit 使用 GraphQL；PR 和 Issue 使用 REST API。
+- 历史或定点回填：Commit、PR 和 Issue 均使用 GraphQL，并在完成后重建目标日期的 SIG 和组织聚合。
 
 系统按照以下层级组织数据：
 
