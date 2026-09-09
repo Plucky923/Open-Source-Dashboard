@@ -112,7 +112,7 @@ node backfill_single_repo.js repository-name
 
 ## 重新聚合
 
-已有明细数据正确、但聚合结果需要重建时：
+已有 SIG 和组织快照行存在、但其中的 Git 聚合字段需要重新计算时：
 
 ```bash
 cd backend
@@ -125,7 +125,9 @@ node run_reaggregation.js
 node run_reaggregation.js --flush-cache
 ```
 
-当前脚本重算最近 365 天中 SIG 和组织级的 Commit、增加行数与删除行数，不重新请求 GitHub，也不重算 PR、Issue 字段。它适合底层仓库快照正确、但上层 Git 指标聚合需要修复的场景。
+当前脚本重算最近 365 天中 SIG 和组织级的 Commit、增加行数与删除行数，不重新请求 GitHub，也不重算 PR、Issue 字段。它只 `UPDATE` 已存在的快照行，不会为缺失日期插入新行。
+
+因此，它只适合底层仓库快照正确、上层快照行已经存在，但 Git 指标需要修复的场景。如果 SIG 或组织快照缺少某些日期，应使用 `backfill_date_range.js` 覆盖缺失范围，由完整回填流程重新写入全部聚合字段。
 
 ## 启动时维护开关
 
