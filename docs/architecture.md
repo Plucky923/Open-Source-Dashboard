@@ -36,8 +36,9 @@ Express API ──► React 仪表板 / 数据导出
 
 采集路径会随任务类型变化：
 
-- 定时采集：Commit 使用 GraphQL；PR 和 Issue 使用 REST API。
-- 历史或定点回填：Commit、PR 和 Issue 均使用 GraphQL，并在完成后重建目标日期的 SIG 和组织聚合。
+- 定时采集：Commit 使用 GraphQL；PR 和 Issue 使用 REST API，并写入仓库、SIG 和组织快照。
+- 全量或日期范围回填：`run_graphql_backfill.js` 和 `backfill_date_range.js` 均通过 GraphQL 获取 Commit、PR 和 Issue，并在完成后重建目标日期的 SIG 和组织聚合。
+- 单仓库回填：`backfill_single_repo.js` 的 Commit 使用 GraphQL，PR 和 Issue 使用 REST API；它只写入仓库快照，不完整重建 SIG 和组织聚合。
 
 系统按照以下层级组织数据：
 
