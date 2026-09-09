@@ -8,16 +8,21 @@ const {
 } = require('./repository_sig_sync');
 
 /**
- * Upstream organization tracking.
+ * Upstream (related) organization tracking.
  *
- * The osd_sig GitHub Custom Property only exists inside the dashboard's own
- * organization (hust-open-atom-club). Repositories of external upstream
- * organizations (e.g. rustsbi) cannot carry that property, so their tracking
- * scope is configured in the upstream_org_trackings table instead:
- * every repository of the configured organization is enumerated and assigned
- * to the configured SIG, and the configured main repository additionally
- * collects commit statistics across ALL branches.
+ * GitHub Custom Properties only exist inside the dashboard's own organization
+ * (hust-open-atom-club), so repositories of related upstream organizations
+ * (e.g. rustsbi) declare their SIG membership with a GitHub topic instead:
+ * a repository carrying the topic `osd-sig-<sig-slug>` (e.g. osd-sig-r2)
+ * is tracked under that SIG. Repositories without such a topic are not
+ * tracked; if a tracked repository drops its topic, it keeps its history
+ * but stops being counted. Commit statistics always come from the default
+ * branch, exactly like every other tracked repository.
  */
+
+// GitHub topics cannot contain underscores, so the osd_sig Custom Property
+// name maps to the `osd-sig-` topic prefix upstream.
+const UPSTREAM_SIG_TOPIC_PREFIX = 'osd-sig-';
 
 function githubHeaders(githubToken) {
     if (!githubToken) {
@@ -31,7 +36,51 @@ function githubHeaders(githubToken) {
     };
 }
 
-function normalizeUpstreamRepositories(rows, { includeArchived, includeForks }) {
+/**
+ * Extract the SIG slug a repository declares through its osd-sig-* topic.
+ * Returns null when the repository declares nothing.
+ */
+function resolveSigSlugFromTopics(repositoryName, topics) {
+    if (topics === undefined || topics === null) {
+        throw new Error(`GitHub returned upstream repository ${repositoryName} without a topics list.`);
+    }
+    if (!Array.isArray(topics)) {
+        throw new Error(`GitHub returned an invalid topics list for upstream repository ${repositoryName}.`);
+    }
+
+    const supportedValues = new Set(Object.keys(SIG_DEFINITIONS));
+    const declaredSlugs = [];
+    for (const topic of topics) {
+        if (typeof topic !== 'string') {
+            throw new Error(`GitHub returned an invalid topic for upstream repository ${repositoryName}.`);
+        }
+        if (!topic.startsWith(UPSTREAM_SIG_TOPIC_PREFIX)) {
+            continue;
+        }
+        declaredSlugs.push(topic.slice(UPSTREAM_SIG_TOPIC_PREFIX.length));
+    }
+
+    if (declaredSlugs.length === 0) {
+        return null;
+    }
+    if (declaredSlugs.length > 1) {
+        throw new Error(
+            `Upstream repository ${repositoryName} declares multiple SIG topics: ${declaredSlugs.map((slug) => `${UPSTREAM_SIG_TOPIC_PREFIX}${slug}`).join(', ')}.`
+        );
+    }
+
+    const slug = declaredSlugs[0];
+    if (!supportedValues.has(slug)) {
+        throw new Error(`Upstream repository ${repositoryName} declares unsupported SIG topic ${UPSTREAM_SIG_TOPIC_PREFIX}${slug}.`);
+    }
+    return slug;
+}
+
+/**
+ * Normalize an upstream org repository listing: keep only repositories that
+ * declare an osd-sig-* topic, together with the declared SIG slug.
+ */
+function normalizeUpstreamRepositories(rows) {
     const seenNames = new Set();
     const seenRepositoryIds = new Set();
     const assignments = [];
@@ -40,13 +89,6 @@ function normalizeUpstreamRepositories(rows, { includeArchived, includeForks }) 
         const repositoryName = repository?.name;
         if (typeof repositoryName !== 'string' || repositoryName.trim() === '') {
             throw new Error('GitHub returned an upstream repository without a name.');
-        }
-
-        if (repository.archived && !includeArchived) {
-            continue;
-        }
-        if (repository.fork && !includeForks) {
-            continue;
         }
 
         const normalizedName = repositoryName.toLowerCase();
@@ -68,7 +110,12 @@ function normalizeUpstreamRepositories(rows, { includeArchived, includeForks }) 
         }
         seenRepositoryIds.add(repositoryId);
 
-        assignments.push({ repositoryId, repositoryName });
+        const sigSlug = resolveSigSlugFromTopics(repositoryName, repository.topics);
+        if (sigSlug === null) {
+            continue;
+        }
+
+        assignments.push({ repositoryId, repositoryName, sigSlug });
     }
 
     assignments.sort((left, right) => left.repositoryName.localeCompare(right.repositoryName));
@@ -78,8 +125,6 @@ function normalizeUpstreamRepositories(rows, { includeArchived, includeForks }) 
 async function fetchUpstreamOrgRepositories({
     githubToken,
     ownerLogin,
-    includeArchived = true,
-    includeForks = true,
     httpClient = axios,
 }) {
     const headers = githubHeaders(githubToken);
@@ -109,22 +154,15 @@ async function fetchUpstreamOrgRepositories({
         nextUrl = getNextPageUrl(response.headers?.link);
     }
 
-    return normalizeUpstreamRepositories(rows, { includeArchived, includeForks });
+    return normalizeUpstreamRepositories(rows);
 }
 
 async function applyUpstreamOrgRepositories({
     pool,
     assignments,
     ownerLogin,
-    sigSlug,
-    mainRepoName = null,
     orgName = DEFAULT_ORG_NAME,
 }) {
-    const sigName = SIG_DEFINITIONS[sigSlug];
-    if (!sigName) {
-        throw new Error(`Unsupported upstream SIG slug: ${sigSlug}`);
-    }
-
     const client = await pool.connect();
 
     try {
@@ -139,19 +177,26 @@ async function applyUpstreamOrgRepositories({
         );
         const orgId = orgResult.rows[0].id;
 
-        const sigResult = await client.query(
-            `INSERT INTO special_interest_groups (org_id, slug, name)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (org_id, slug) DO UPDATE SET name = EXCLUDED.name
-             RETURNING id`,
-            [orgId, sigSlug, sigName]
-        );
-        const targetSigId = sigResult.rows[0].id;
+        // SIG rows are maintained by seed.sql and the club-org sync; upsert the
+        // ones referenced by this organization's assignments so the upstream
+        // sync also works standalone.
+        const sigIdsBySlug = new Map();
+        for (const sigSlug of new Set(assignments.map((assignment) => assignment.sigSlug))) {
+            const sigResult = await client.query(
+                `INSERT INTO special_interest_groups (org_id, slug, name)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (org_id, slug) DO UPDATE SET name = EXCLUDED.name
+                 RETURNING id`,
+                [orgId, sigSlug, SIG_DEFINITIONS[sigSlug]]
+            );
+            sigIdsBySlug.set(sigSlug, sigResult.rows[0].id);
+        }
 
         const existingResult = await client.query(
-            `SELECT id, github_id, name, sig_id, track_all_branches
-             FROM repositories
-             WHERE org_id = $1 AND owner_login = $2`,
+            `SELECT r.id, r.github_id, r.name, r.sig_id, sig.slug AS sig_slug
+             FROM repositories r
+             LEFT JOIN special_interest_groups sig ON sig.id = r.sig_id
+             WHERE r.org_id = $1 AND r.owner_login = $2`,
             [orgId, ownerLogin]
         );
 
@@ -174,22 +219,19 @@ async function applyUpstreamOrgRepositories({
         let trackingChanged = false;
 
         for (const assignment of assignments) {
-            const shouldTrackAllBranches = mainRepoName !== null
-                && assignment.repositoryName.toLowerCase() === mainRepoName.toLowerCase();
-
+            const targetSigId = sigIdsBySlug.get(assignment.sigSlug);
             const existing = existingByGithubId.get(assignment.repositoryId);
             if (existing) {
                 matchedRepositoryIds.add(existing.id);
 
                 const mappingChanged = existing.sig_id !== targetSigId;
                 const nameChanged = existing.name !== assignment.repositoryName;
-                const branchScopeChanged = existing.track_all_branches !== shouldTrackAllBranches;
-                if (mappingChanged || nameChanged || branchScopeChanged) {
+                if (mappingChanged || nameChanged) {
                     await client.query(
                         `UPDATE repositories
-                         SET name = $1, sig_id = $2, github_id = $3, track_all_branches = $4
-                         WHERE id = $5`,
-                        [assignment.repositoryName, targetSigId, assignment.repositoryId, shouldTrackAllBranches, existing.id]
+                         SET name = $1, sig_id = $2, github_id = $3
+                         WHERE id = $4`,
+                        [assignment.repositoryName, targetSigId, assignment.repositoryId, existing.id]
                     );
                 }
                 if (mappingChanged) {
@@ -200,36 +242,25 @@ async function applyUpstreamOrgRepositories({
                         affectedSigIds.add(existing.sig_id);
                     }
                     affectedSigIds.add(targetSigId);
-                }
-                if (mappingChanged || branchScopeChanged) {
-                    changes.push({
-                        repository: assignment.repositoryName,
-                        from: existing.sig_id,
-                        to: targetSigId,
-                        ...(branchScopeChanged ? { trackAllBranches: shouldTrackAllBranches } : {}),
-                    });
+                    changes.push({ repository: assignment.repositoryName, from: existing.sig_slug, to: assignment.sigSlug });
                 }
                 continue;
             }
 
             await client.query(
-                `INSERT INTO repositories (org_id, sig_id, github_id, name, owner_login, track_all_branches, is_in_organization)
-                 VALUES ($1, $2, $3, $4, $5, $6, FALSE)`,
-                [orgId, targetSigId, assignment.repositoryId, assignment.repositoryName, ownerLogin, shouldTrackAllBranches]
+                `INSERT INTO repositories (org_id, sig_id, github_id, name, owner_login, is_in_organization)
+                 VALUES ($1, $2, $3, $4, $5, FALSE)`,
+                [orgId, targetSigId, assignment.repositoryId, assignment.repositoryName, ownerLogin]
             );
             affectedSigIds.add(targetSigId);
             trackingChanged = true;
             created += 1;
-            changes.push({
-                repository: assignment.repositoryName,
-                from: null,
-                to: sigSlug,
-                ...(shouldTrackAllBranches ? { trackAllBranches: true } : {}),
-            });
+            changes.push({ repository: assignment.repositoryName, from: null, to: assignment.sigSlug });
         }
 
-        // Repositories that disappeared from the upstream org listing keep
-        // their history but stop being tracked, mirroring the club-org policy.
+        // Repositories that disappeared from the upstream org listing, or that
+        // dropped their osd-sig topic, keep their history but stop being
+        // tracked, mirroring the club-org policy.
         for (const repository of existingResult.rows) {
             if (matchedRepositoryIds.has(repository.id) || repository.sig_id === null) {
                 continue;
@@ -241,7 +272,7 @@ async function applyUpstreamOrgRepositories({
                 'UPDATE repositories SET sig_id = NULL WHERE id = $1',
                 [repository.id]
             );
-            changes.push({ repository: repository.name, from: repository.sig_id, to: null, isInOrganization: false });
+            changes.push({ repository: repository.name, from: repository.sig_slug, to: null, isInOrganization: false });
             disabled += 1;
         }
 
@@ -258,7 +289,6 @@ async function applyUpstreamOrgRepositories({
 
         return {
             ownerLogin,
-            sigSlug,
             repositories: assignments.length,
             tracked: assignments.length,
             created,
@@ -277,7 +307,7 @@ async function applyUpstreamOrgRepositories({
 
 async function loadUpstreamOrgTrackings(pool) {
     const result = await pool.query(
-        `SELECT owner_login, sig_slug, main_repo_name, include_archived, include_forks
+        `SELECT owner_login
          FROM upstream_org_trackings
          WHERE enabled
          ORDER BY owner_login`
@@ -286,8 +316,9 @@ async function loadUpstreamOrgTrackings(pool) {
 }
 
 /**
- * Synchronize every enabled upstream organization configured in
- * upstream_org_trackings. Called alongside the club-org osd_sig sync.
+ * Synchronize every enabled related organization configured in
+ * upstream_org_trackings: repositories declaring an osd-sig-* topic are
+ * tracked under that SIG. Called alongside the club-org osd_sig sync.
  */
 async function syncUpstreamOrgRepositories({
     pool,
@@ -302,8 +333,6 @@ async function syncUpstreamOrgRepositories({
         const assignments = await fetchUpstreamOrgRepositories({
             githubToken,
             ownerLogin: configuration.owner_login,
-            includeArchived: configuration.include_archived,
-            includeForks: configuration.include_forks,
             httpClient,
         });
 
@@ -311,8 +340,6 @@ async function syncUpstreamOrgRepositories({
             pool,
             assignments,
             ownerLogin: configuration.owner_login,
-            sigSlug: configuration.sig_slug,
-            mainRepoName: configuration.main_repo_name,
             orgName,
         }));
     }
@@ -328,6 +355,8 @@ async function syncUpstreamOrgRepositories({
 }
 
 module.exports = {
+    UPSTREAM_SIG_TOPIC_PREFIX,
+    resolveSigSlugFromTopics,
     normalizeUpstreamRepositories,
     fetchUpstreamOrgRepositories,
     applyUpstreamOrgRepositories,

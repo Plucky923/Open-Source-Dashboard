@@ -11,8 +11,6 @@ const PDFDocument = require('pdfkit');
 const {
     fetchCommitHistoryViaGraphQL,
     fetchCommitsViaGraphQL,
-    fetchAllBranchCommitHistoryViaGraphQL,
-    fetchAllBranchCommitsViaGraphQL,
 } = require('./github_commit_history');
 const {
     isBotContributor,
@@ -578,12 +576,9 @@ async function storeRepoApiStatsForDate(repoId, repoName, dateStr, stats, contri
  */
 async function fetchAndStoreRepoCommitStats(repo, targetDate) {
     const ownerLogin = repo.owner_login || ORG_NAME;
-    // Repositories flagged with track_all_branches aggregate commits from
-    // every live branch (deduplicated by commit oid) instead of only the
-    // default branch.
-    const commitStats = repo.track_all_branches
-        ? await fetchAllBranchCommitsViaGraphQL(repo.name, targetDate, githubGraphQL, ownerLogin)
-        : await fetchCommitsViaGraphQL(repo.name, targetDate, githubGraphQL, ownerLogin);
+    // Commit statistics always come from the repository's default branch,
+    // uniformly for club and upstream repositories.
+    const commitStats = await fetchCommitsViaGraphQL(repo.name, targetDate, githubGraphQL, ownerLogin);
     await storeRepoCommitStats(repo.id, repo.name, targetDate, commitStats);
 }
 
@@ -611,11 +606,15 @@ async function fetchCommitHistoryForRepositories(repositories, startDate, endDat
     const historyByRepoId = new Map();
     const tasks = repositories.map((repo) => async () => {
         const ownerLogin = repo.owner_login || ORG_NAME;
-        const statsMap = repo.track_all_branches
-            ? await fetchAllBranchCommitHistoryViaGraphQL(repo.name, startDate, endDate, githubGraphQL, ownerLogin)
-            : await fetchCommitHistoryViaGraphQL(repo.name, startDate, endDate, githubGraphQL, ownerLogin);
+        const statsMap = await fetchCommitHistoryViaGraphQL(
+            repo.name,
+            startDate,
+            endDate,
+            githubGraphQL,
+            ownerLogin
+        );
         historyByRepoId.set(repo.id, statsMap);
-        console.log(`[GraphQL Commits] ${ownerLogin}/${repo.name}: fetched ${statsMap.size} days${repo.track_all_branches ? ' (all branches)' : ''}`);
+        console.log(`[GraphQL Commits] ${ownerLogin}/${repo.name}: fetched ${statsMap.size} days`);
     });
 
     await runPromisesWithConcurrency(tasks, 5);
@@ -864,7 +863,7 @@ async function runDailyIngestionJob() {
             return;
         }
 
-        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login, track_all_branches FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
+        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
         const repositories = reposResult.rows;
 
         if (repositories.length === 0) {
@@ -979,7 +978,7 @@ async function runBackfillJob(days = 7) {
             return;
         }
 
-        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login, track_all_branches FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
+        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
         const repositories = reposResult.rows;
 
         if (repositories.length === 0) {
@@ -1166,7 +1165,7 @@ async function runBackfillJobWithGraphQL(days = 30) {
             return;
         }
 
-        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login, track_all_branches FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
+        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
         const repositories = reposResult.rows;
 
         if (repositories.length === 0) {

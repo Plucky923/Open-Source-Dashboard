@@ -88,19 +88,7 @@ function applyCommitToStats(result, commit) {
     result.authorStats[user.login].lines_deleted += deletions;
 }
 
-function recordHistoryNode(statsMap, commit, repoName, seenOids = null) {
-    if (seenOids !== null) {
-        if (!commit.oid) {
-            throw new Error(`Repository ${repoName} returned a commit without an oid.`);
-        }
-        // The same commit can be reachable from several branches; every
-        // unique commit is only counted once across the whole walk.
-        if (seenOids.has(commit.oid)) {
-            return;
-        }
-        seenOids.add(commit.oid);
-    }
-
+function recordHistoryNode(statsMap, commit, repoName) {
     const commitDate = new Date(commit.committedDate);
     if (Number.isNaN(commitDate.getTime())) {
         throw new Error(`Repository ${repoName} returned a commit without a valid committedDate.`);
@@ -249,161 +237,6 @@ async function fetchCommitHistoryViaGraphQL(
     return statsMap;
 }
 
-/**
- * List every live branch (refs/heads/*) of a repository.
- */
-async function fetchBranchNamesViaGraphQL(
-    repoName,
-    graphQLClient = defaultGraphQLClient,
-    orgName = DEFAULT_ORG_NAME
-) {
-    const query = `
-        query RepoBranches($owner: String!, $repo: String!, $cursor: String) {
-            repository(owner: $owner, name: $repo) {
-                refs(refPrefix: "refs/heads/", first: 100, after: $cursor) {
-                    pageInfo {
-                        hasNextPage
-                        endCursor
-                    }
-                    nodes {
-                        name
-                    }
-                }
-            }
-        }
-    `;
-
-    const branchNames = [];
-    let cursor = null;
-    let hasNextPage = true;
-
-    while (hasNextPage) {
-        const data = await graphQLClient(query, { owner: orgName, repo: repoName, cursor });
-
-        if (!data?.repository) {
-            throw new Error(`Repository ${repoName} not found or inaccessible.`);
-        }
-
-        const refs = data.repository.refs;
-        if (!refs?.nodes) {
-            throw new Error(`Repository ${repoName} did not return a branch list.`);
-        }
-
-        for (const ref of refs.nodes) {
-            branchNames.push(ref.name);
-        }
-
-        hasNextPage = refs.pageInfo?.hasNextPage || false;
-        cursor = refs.pageInfo?.endCursor || null;
-    }
-
-    return branchNames;
-}
-
-/**
- * Fetch commit history across ALL live branches of a repository for a local
- * calendar-date range. The same commit (identical oid) reachable from several
- * branches is counted exactly once; merge commits keep the `git log --numstat`
- * semantics shared with the default-branch pipeline.
- */
-async function fetchAllBranchCommitHistoryViaGraphQL(
-    repoName,
-    startDate,
-    endDate,
-    graphQLClient = defaultGraphQLClient,
-    orgName = DEFAULT_ORG_NAME
-) {
-    const { normalizedStartDate, normalizedEndDate } = validateDateRange(startDate, endDate);
-
-    const endExclusive = new Date(normalizedEndDate);
-    endExclusive.setDate(endExclusive.getDate() + 1);
-
-    const statsMap = buildDailyStatsMap(normalizedStartDate, normalizedEndDate);
-    const seenOids = new Set();
-
-    const branchNames = await fetchBranchNamesViaGraphQL(repoName, graphQLClient, orgName);
-
-    const query = `
-        query RefCommits($owner: String!, $repo: String!, $ref: String!, $since: GitTimestamp!, $until: GitTimestamp!, $cursor: String) {
-            repository(owner: $owner, name: $repo) {
-                ref(qualifiedName: $ref) {
-                    target {
-                        ... on Commit {
-                            history(first: 100, since: $since, until: $until, after: $cursor) {
-                                pageInfo {
-                                    hasNextPage
-                                    endCursor
-                                }
-                                nodes {
-                                    oid
-                                    committedDate
-                                    author {
-                                        user {
-                                            login
-                                            databaseId
-                                            avatarUrl
-                                        }
-                                    }
-                                    additions
-                                    deletions
-                                    parents {
-                                        totalCount
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    `;
-
-    try {
-        for (const branchName of branchNames) {
-            let cursor = null;
-            let hasNextPage = true;
-
-            while (hasNextPage) {
-                const data = await graphQLClient(query, {
-                    owner: orgName,
-                    repo: repoName,
-                    ref: `refs/heads/${branchName}`,
-                    since: normalizedStartDate.toISOString(),
-                    until: endExclusive.toISOString(),
-                    cursor,
-                });
-
-                if (!data?.repository) {
-                    throw new Error(`Repository ${repoName} not found or inaccessible.`);
-                }
-
-                // The branch may have been deleted between listing refs and
-                // walking its history; nothing left to count for it.
-                const ref = data.repository.ref;
-                if (!ref) {
-                    break;
-                }
-
-                const history = ref.target?.history;
-                if (!history?.nodes) {
-                    throw new Error(`Repository ${repoName} branch ${branchName} did not return commit history.`);
-                }
-
-                for (const commit of history.nodes) {
-                    recordHistoryNode(statsMap, commit, repoName, seenOids);
-                }
-
-                hasNextPage = history.pageInfo?.hasNextPage || false;
-                cursor = history.pageInfo?.endCursor || null;
-            }
-        }
-    } catch (error) {
-        throw new Error(`[GraphQL] Failed to fetch all-branch commits for ${repoName}: ${error.message}`, { cause: error });
-    }
-
-    return statsMap;
-}
-
 async function fetchCommitsViaGraphQL(
     repoName,
     targetDate,
@@ -421,28 +254,8 @@ async function fetchCommitsViaGraphQL(
     return statsMap.get(formatDate(normalizedTargetDate));
 }
 
-async function fetchAllBranchCommitsViaGraphQL(
-    repoName,
-    targetDate,
-    graphQLClient = defaultGraphQLClient,
-    orgName = DEFAULT_ORG_NAME
-) {
-    const normalizedTargetDate = normalizeDate(targetDate);
-    const statsMap = await fetchAllBranchCommitHistoryViaGraphQL(
-        repoName,
-        normalizedTargetDate,
-        normalizedTargetDate,
-        graphQLClient,
-        orgName
-    );
-    return statsMap.get(formatDate(normalizedTargetDate));
-}
-
 module.exports = {
     defaultGraphQLClient,
     fetchCommitHistoryViaGraphQL,
     fetchCommitsViaGraphQL,
-    fetchBranchNamesViaGraphQL,
-    fetchAllBranchCommitHistoryViaGraphQL,
-    fetchAllBranchCommitsViaGraphQL,
 };

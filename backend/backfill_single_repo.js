@@ -4,7 +4,6 @@ const { Pool } = require('pg');
 const axios = require('axios');
 const {
     fetchCommitHistoryViaGraphQL,
-    fetchAllBranchCommitHistoryViaGraphQL,
 } = require('./github_commit_history');
 const {
     DEFAULT_PROPERTY_NAME,
@@ -207,7 +206,7 @@ async function backfillSingleRepository(repoName, ownerLogin = ORG_NAME, days = 
 
     // 1. 从数据库获取 repo_id
     const repoResult = await pool.query(
-        `SELECT r.id, r.track_all_branches
+        `SELECT r.id
          FROM repositories r
          JOIN organizations org ON org.id = r.org_id
          WHERE org.name = $1 AND r.name = $2 AND r.owner_login = $3 AND r.sig_id IS NOT NULL`,
@@ -217,8 +216,7 @@ async function backfillSingleRepository(repoName, ownerLogin = ORG_NAME, days = 
         throw new Error(`Repository "${ownerLogin}/${repoName}" is missing or untracked. (Upstream repositories require their owner as the second argument.)`);
     }
     const repoId = repoResult.rows[0].id;
-    const trackAllBranches = repoResult.rows[0].track_all_branches === true;
-    console.log(`Found repository in DB with ID: ${repoId}${trackAllBranches ? ' (all-branch commit tracking)' : ''}`);
+    console.log(`Found repository in DB with ID: ${repoId}`);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -229,9 +227,7 @@ async function backfillSingleRepository(repoName, ownerLogin = ORG_NAME, days = 
     endDate.setDate(today.getDate() - 1);
 
     console.log(`Fetching commit history through GraphQL for ${formatDate(startDate)} to ${formatDate(endDate)}...`);
-    const commitStatsMap = trackAllBranches
-        ? await fetchAllBranchCommitHistoryViaGraphQL(repoName, startDate, endDate, undefined, ownerLogin)
-        : await fetchCommitHistoryViaGraphQL(repoName, startDate, endDate, undefined, ownerLogin);
+    const commitStatsMap = await fetchCommitHistoryViaGraphQL(repoName, startDate, endDate, undefined, ownerLogin);
 
     for (let i = days; i >= 1; i--) {
         const targetDate = new Date(today);

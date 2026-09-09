@@ -21,7 +21,6 @@ const {
 const {
     fetchCommitHistoryViaGraphQL: fetchCommitHistoryRangeViaGraphQL,
     fetchCommitsViaGraphQL: fetchCommitsForDayViaGraphQL,
-    fetchAllBranchCommitHistoryViaGraphQL,
 } = require('./github_commit_history');
 const {
     DEFAULT_PROPERTY_NAME,
@@ -463,15 +462,6 @@ async function fetchCommitHistoryViaGraphQL(repoName, startDate, endDate, graphQ
     return fetchCommitHistoryRangeViaGraphQL(repoName, startDate, endDate, graphQLClient, ownerLogin);
 }
 
-// Repositories flagged with track_all_branches aggregate commits from every
-// live branch (deduplicated by commit oid) instead of only the default branch.
-async function fetchRepoCommitHistory(repo, startDate, endDate, graphQLClient = githubGraphQL) {
-    const ownerLogin = repo.owner_login || ORG_NAME;
-    return repo.track_all_branches
-        ? fetchAllBranchCommitHistoryViaGraphQL(repo.name, startDate, endDate, graphQLClient, ownerLogin)
-        : fetchCommitHistoryRangeViaGraphQL(repo.name, startDate, endDate, graphQLClient, ownerLogin);
-}
-
 /**
  * Fetch and store commit statistics for a repository (GraphQL-based)
  */
@@ -643,7 +633,7 @@ async function runGraphQLBackfillForRange({ startDate, endDate, progressFile = P
             return;
         }
 
-        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login, track_all_branches FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
+        const reposResult = await pool.query('SELECT id, name, sig_id, owner_login FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
         const repositories = reposResult.rows;
 
         if (repositories.length === 0) {
@@ -687,10 +677,12 @@ async function runGraphQLBackfillForRange({ startDate, endDate, progressFile = P
             }
 
             commitTasks.push(async () => {
-                const statsMap = await fetchRepoCommitHistory(
-                    repo,
+                const statsMap = await fetchCommitHistoryViaGraphQL(
+                    repo.name,
                     normalizedStartDate,
-                    normalizedEndDate
+                    normalizedEndDate,
+                    githubGraphQL,
+                    repo.owner_login || ORG_NAME
                 );
 
                 for (const targetDate of pendingDates) {

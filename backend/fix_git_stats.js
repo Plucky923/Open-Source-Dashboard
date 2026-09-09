@@ -1,7 +1,6 @@
 // A one-time script to correct historical commit stats without re-running PR/Issue API calls.
 const {
     fetchCommitHistoryViaGraphQL,
-    fetchAllBranchCommitHistoryViaGraphQL,
 } = require('./github_commit_history');
 
 require('dotenv').config();
@@ -117,7 +116,7 @@ async function runCommitStatsCorrection(daysToFix = 30) {
     if (!org) {
         throw new Error('Monitored organization not found in DB.');
     }
-    const reposResult = await pool.query('SELECT id, name, owner_login, track_all_branches FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
+    const reposResult = await pool.query('SELECT id, name, owner_login FROM repositories WHERE org_id = $1 AND sig_id IS NOT NULL', [org.id]);
     const repositories = reposResult.rows;
     console.log(`Found ${repositories.length} repositories to process.`);
 
@@ -132,9 +131,7 @@ async function runCommitStatsCorrection(daysToFix = 30) {
     const tasks = repositories.map(repo => async () => {
         const ownerLogin = repo.owner_login || ORG_NAME;
         console.log(`\n--- Fetching ${ownerLogin}/${repo.name}: ${formatDate(startDate)} to ${formatDate(endDate)} ---`);
-        const statsMap = repo.track_all_branches
-            ? await fetchAllBranchCommitHistoryViaGraphQL(repo.name, startDate, endDate, undefined, ownerLogin)
-            : await fetchCommitHistoryViaGraphQL(repo.name, startDate, endDate, undefined, ownerLogin);
+        const statsMap = await fetchCommitHistoryViaGraphQL(repo.name, startDate, endDate, undefined, ownerLogin);
 
         for (let i = daysToFix; i >= 1; i--) {
             const targetDate = new Date(today);
