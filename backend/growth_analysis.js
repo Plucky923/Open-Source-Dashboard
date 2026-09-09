@@ -106,9 +106,14 @@ function calculateGrowthMetrics(current, previous) {
     };
 }
 
+function hasCompletePeriodDates(period) {
+    return Boolean(period?.start && period?.end);
+}
+
 module.exports = {
     buildComparisonPeriods,
     calculateGrowthMetrics,
     formatGrowthMetrics,
     getRangeDays,
+    hasCompletePeriodDates,
 };

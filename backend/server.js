@@ -47,6 +47,7 @@ const {
     buildComparisonPeriods,
     calculateGrowthMetrics,
     formatGrowthMetrics,
+    hasCompletePeriodDates,
 } = require('./growth_analysis');
 
 const app = express();
@@ -2731,25 +2732,29 @@ app.post('/api/v1/export/pdf', async (req, res) => {
             doc.moveDown();
             doc.fontSize(11);
 
-            doc.text(`当前周期: ${growthData.period.current.start} 至 ${growthData.period.current.end}`);
-            if (growthData.period.current.metrics) {
-                const curr = growthData.period.current.metrics;
-                doc.text(`  PRs: ${curr.new_prs}, Issues: ${curr.new_issues}, Commits: ${curr.new_commits}`);
-            }
-            doc.moveDown(0.5);
-
-            if (growthData.period.previous) {
-                doc.text(`上一周期: ${growthData.period.previous.start} 至 ${growthData.period.previous.end}`);
-            } else if (growthData.comparison_unavailable_reason === 'unbounded_range') {
-                doc.text('全部时间范围不提供环比');
-            } else if (growthData.comparison_unavailable_reason === 'insufficient_history') {
-                doc.text('历史数据不足，暂不提供周期环比');
-            } else {
+            if (!hasCompletePeriodDates(growthData.period.current)) {
                 doc.text('暂无数据，无法进行周期对比');
-            }
-            if (growthData.period.previous?.metrics) {
-                const prev = growthData.period.previous.metrics;
-                doc.text(`  PRs: ${prev.new_prs}, Issues: ${prev.new_issues}, Commits: ${prev.new_commits}`);
+            } else {
+                doc.text(`当前周期: ${growthData.period.current.start} 至 ${growthData.period.current.end}`);
+                if (growthData.period.current.metrics) {
+                    const curr = growthData.period.current.metrics;
+                    doc.text(`  PRs: ${curr.new_prs}, Issues: ${curr.new_issues}, Commits: ${curr.new_commits}`);
+                }
+                doc.moveDown(0.5);
+
+                if (growthData.period.previous) {
+                    doc.text(`上一周期: ${growthData.period.previous.start} 至 ${growthData.period.previous.end}`);
+                } else if (growthData.comparison_unavailable_reason === 'unbounded_range') {
+                    doc.text('全部时间范围不提供环比');
+                } else if (growthData.comparison_unavailable_reason === 'insufficient_history') {
+                    doc.text('历史数据不足，暂不提供周期环比');
+                } else {
+                    doc.text('暂无数据，无法进行周期对比');
+                }
+                if (growthData.period.previous?.metrics) {
+                    const prev = growthData.period.previous.metrics;
+                    doc.text(`  PRs: ${prev.new_prs}, Issues: ${prev.new_issues}, Commits: ${prev.new_commits}`);
+                }
             }
             doc.moveDown(1.5);
         }

@@ -6,6 +6,7 @@ const {
     calculateGrowthMetrics,
     formatGrowthMetrics,
     getRangeDays,
+    hasCompletePeriodDates,
 } = require('../growth_analysis');
 
 test('builds adjacent, equal seven-day comparison windows from the latest snapshot', () => {
@@ -40,14 +41,24 @@ test('uses the complete data bounds and disables comparison for all time', () =>
 });
 
 test('returns a no-data window when no snapshots exist', () => {
+    const periods = buildComparisonPeriods('30d', null, null);
+
     assert.deepEqual(
-        buildComparisonPeriods('30d', null, null),
+        periods,
         {
             comparison_available: false,
             reason: 'no_data',
             current: { start: null, end: null },
             previous: null,
         },
+    );
+    assert.equal(hasCompletePeriodDates(periods.current), false);
+});
+
+test('recognizes periods with both export dates', () => {
+    assert.equal(
+        hasCompletePeriodDates({ start: '2026-08-10', end: '2026-09-08' }),
+        true,
     );
 });
 
