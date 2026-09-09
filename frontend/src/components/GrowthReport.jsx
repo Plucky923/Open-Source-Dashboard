@@ -98,7 +98,9 @@ const GrowthReport = ({ growthData, loading }) => {
                 <p className="mt-4 rounded-lg border border-gray-700 bg-gray-900/40 px-4 py-3 text-sm text-gray-400">
                     {growthData.comparison_unavailable_reason === 'unbounded_range'
                         ? '全部时间范围不提供环比，请选择具体时间范围。'
-                        : '暂无足够数据进行周期对比。'}
+                        : growthData.comparison_unavailable_reason === 'insufficient_history'
+                            ? '历史数据不足，暂不提供周期环比。'
+                            : '暂无足够数据进行周期对比。'}
                 </p>
             )}
         </div>

@@ -56,6 +56,18 @@ function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate) {
     const previousEnd = addDays(currentStart, -1);
     const previousStart = addDays(previousEnd, -(days - 1));
 
+    if (!firstDate || firstDate > previousStart) {
+        return {
+            comparison_available: false,
+            reason: 'insufficient_history',
+            current: {
+                start: firstDate && firstDate > currentStart ? firstDate : currentStart,
+                end: latestDate,
+            },
+            previous: null,
+        };
+    }
+
     return {
         comparison_available: true,
         reason: null,

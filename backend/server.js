@@ -2740,8 +2740,12 @@ app.post('/api/v1/export/pdf', async (req, res) => {
 
             if (growthData.period.previous) {
                 doc.text(`上一周期: ${growthData.period.previous.start} 至 ${growthData.period.previous.end}`);
-            } else {
+            } else if (growthData.comparison_unavailable_reason === 'unbounded_range') {
                 doc.text('全部时间范围不提供环比');
+            } else if (growthData.comparison_unavailable_reason === 'insufficient_history') {
+                doc.text('历史数据不足，暂不提供周期环比');
+            } else {
+                doc.text('暂无数据，无法进行周期对比');
             }
             if (growthData.period.previous?.metrics) {
                 const prev = growthData.period.previous.metrics;

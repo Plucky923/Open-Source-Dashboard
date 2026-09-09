@@ -51,6 +51,32 @@ test('returns a no-data window when no snapshots exist', () => {
     );
 });
 
+test('disables comparison when the previous window is not fully retained', () => {
+    assert.deepEqual(
+        buildComparisonPeriods('30d', '2026-08-10', '2026-09-08'),
+        {
+            comparison_available: false,
+            reason: 'insufficient_history',
+            current: { start: '2026-08-10', end: '2026-09-08' },
+            previous: null,
+        },
+    );
+});
+
+test('shows only the actually retained portion of an incomplete current window', () => {
+    assert.deepEqual(
+        buildComparisonPeriods('30d', '2026-08-20', '2026-09-08').current,
+        { start: '2026-08-20', end: '2026-09-08' },
+    );
+});
+
+test('allows comparison when history begins on the previous window boundary', () => {
+    assert.equal(
+        buildComparisonPeriods('30d', '2026-07-11', '2026-09-08').comparison_available,
+        true,
+    );
+});
+
 test('supports leap-day date arithmetic and defaults unknown ranges to thirty days', () => {
     assert.equal(getRangeDays('unknown'), 30);
     assert.deepEqual(
