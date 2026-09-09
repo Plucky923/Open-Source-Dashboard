@@ -9,6 +9,19 @@ const {
     hasCompletePeriodDates,
 } = require('../growth_analysis');
 
+function buildDateRange(start, end) {
+    const dates = [];
+    const current = new Date(`${start}T00:00:00.000Z`);
+    const last = new Date(`${end}T00:00:00.000Z`);
+
+    while (current <= last) {
+        dates.push(current.toISOString().slice(0, 10));
+        current.setUTCDate(current.getUTCDate() + 1);
+    }
+
+    return dates;
+}
+
 test('builds adjacent, equal seven-day comparison windows from the latest snapshot', () => {
     assert.deepEqual(
         buildComparisonPeriods('7d', '2024-09-05', '2026-09-08'),
@@ -82,9 +95,33 @@ test('shows only the actually retained portion of an incomplete current window',
 });
 
 test('allows comparison when history begins on the previous window boundary', () => {
+    const snapshotDates = buildDateRange('2026-07-11', '2026-09-08');
+
     assert.equal(
-        buildComparisonPeriods('30d', '2026-07-11', '2026-09-08').comparison_available,
+        buildComparisonPeriods('30d', '2026-07-11', '2026-09-08', snapshotDates).comparison_available,
         true,
+    );
+});
+
+test('disables comparison when either window contains an internal gap', () => {
+    const snapshotDates = buildDateRange('2026-07-11', '2026-09-08')
+        .filter(date => date !== '2026-08-15');
+
+    assert.deepEqual(
+        buildComparisonPeriods('30d', '2026-07-11', '2026-09-08', snapshotDates),
+        {
+            comparison_available: false,
+            reason: 'insufficient_history',
+            current: { start: '2026-08-10', end: '2026-09-08' },
+            previous: null,
+        },
+    );
+});
+
+test('returns no data when an anchored SIG has no snapshots', () => {
+    assert.equal(
+        buildComparisonPeriods('30d', null, '2026-09-08', []).reason,
+        'no_data',
     );
 });
 

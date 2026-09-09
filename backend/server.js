@@ -2133,7 +2133,11 @@ app.get('/api/v1/organization/growth-analysis', async (req, res) => {
 
         const boundsResult = await pool.query(
             `SELECT MIN(snapshot_date) AS first_snapshot_date,
-                    MAX(snapshot_date) AS latest_snapshot_date
+                    MAX(snapshot_date) AS latest_snapshot_date,
+                    COALESCE(
+                        ARRAY_AGG(snapshot_date::TEXT ORDER BY snapshot_date),
+                        ARRAY[]::TEXT[]
+                    ) AS snapshot_dates
              FROM activity_snapshots
              WHERE org_id = $1`,
             [org.id]
@@ -2143,8 +2147,9 @@ app.get('/api/v1/organization/growth-analysis', async (req, res) => {
             range,
             bounds.first_snapshot_date ? formatDate(bounds.first_snapshot_date) : null,
             bounds.latest_snapshot_date ? formatDate(bounds.latest_snapshot_date) : null,
+            bounds.snapshot_dates,
         );
-        const cacheKey = `org:${ORG_NAME}:growth:v2:${range}:window:${periods.current.start || 'missing'}:${periods.current.end || 'missing'}`;
+        const cacheKey = `org:${ORG_NAME}:growth:v3:${range}:window:${periods.current.start || 'missing'}:${periods.current.end || 'missing'}:coverage:${bounds.snapshot_dates.length}`;
 
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
@@ -2227,19 +2232,25 @@ app.get('/api/v1/sig/:sigId/growth-analysis', async (req, res) => {
         }
 
         const boundsResult = await pool.query(
-            `SELECT MIN(snapshot_date) AS first_snapshot_date,
-                    MAX(snapshot_date) AS latest_snapshot_date
+            `SELECT
+                (SELECT MIN(snapshot_date) FROM sig_snapshots WHERE sig_id = $2) AS first_snapshot_date,
+                MAX(snapshot_date) AS latest_snapshot_date,
+                (SELECT COALESCE(
+                    ARRAY_AGG(snapshot_date::TEXT ORDER BY snapshot_date),
+                    ARRAY[]::TEXT[]
+                 ) FROM sig_snapshots WHERE sig_id = $2) AS snapshot_dates
              FROM activity_snapshots
              WHERE org_id = $1`,
-            [sigResult.rows[0].org_id]
+            [sigResult.rows[0].org_id, sigId]
         );
         const bounds = boundsResult.rows[0];
         const periods = buildComparisonPeriods(
             range,
             bounds.first_snapshot_date ? formatDate(bounds.first_snapshot_date) : null,
             bounds.latest_snapshot_date ? formatDate(bounds.latest_snapshot_date) : null,
+            bounds.snapshot_dates,
         );
-        const cacheKey = `sig:${sigId}:growth:v2:${range}:window:${periods.current.start || 'missing'}:${periods.current.end || 'missing'}`;
+        const cacheKey = `sig:${sigId}:growth:v3:${range}:window:${periods.current.start || 'missing'}:${periods.current.end || 'missing'}:coverage:${bounds.snapshot_dates.length}`;
 
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {

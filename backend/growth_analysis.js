@@ -29,11 +29,14 @@ function getRangeDays(range) {
     return RANGE_DAYS.get(range) || RANGE_DAYS.get('30d');
 }
 
-function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate) {
+function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate, snapshotDates) {
     const firstDate = normalizeDateString(firstSnapshotDate);
     const latestDate = normalizeDateString(latestSnapshotDate);
+    const availableDates = Array.isArray(snapshotDates)
+        ? new Set(snapshotDates.map(normalizeDateString).filter(Boolean))
+        : null;
 
-    if (!latestDate) {
+    if (!latestDate || (availableDates && availableDates.size === 0)) {
         return {
             comparison_available: false,
             reason: 'no_data',
@@ -66,6 +69,19 @@ function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate) {
             },
             previous: null,
         };
+    }
+
+    if (availableDates) {
+        for (let date = previousStart; date <= latestDate; date = addDays(date, 1)) {
+            if (!availableDates.has(date)) {
+                return {
+                    comparison_available: false,
+                    reason: 'insufficient_history',
+                    current: { start: currentStart, end: latestDate },
+                    previous: null,
+                };
+            }
+        }
     }
 
     return {

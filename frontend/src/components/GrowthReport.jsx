@@ -109,6 +109,7 @@ const GrowthReport = ({ growthData, loading }) => {
 
 const PeriodCard = ({ title, period, highlight }) => {
     const { start, end, metrics } = period;
+    const hasCompleteDates = Boolean(start && end);
 
     return (
         <div className={`rounded-lg p-4 border ${
@@ -118,15 +119,17 @@ const PeriodCard = ({ title, period, highlight }) => {
         }`}>
             <h3 className="text-sm font-semibold mb-2 text-gray-300">{title}</h3>
             <p className="text-xs text-gray-400 mb-3">
-                {start && end ? `${start} 至 ${end}` : '暂无数据'}
+                {hasCompleteDates ? `${start} 至 ${end}` : '暂无数据'}
             </p>
-            <div className="space-y-1.5">
-                <MetricRow label="PR" value={metrics.new_prs} />
-                <MetricRow label="Issue" value={metrics.new_issues} />
-                <MetricRow label="Commit" value={metrics.new_commits} />
-                <MetricRow label="新增代码" value={metrics.lines_added} />
-                <MetricRow label="删除代码" value={metrics.lines_deleted} />
-            </div>
+            {hasCompleteDates && metrics && (
+                <div className="space-y-1.5">
+                    <MetricRow label="PR" value={metrics.new_prs} />
+                    <MetricRow label="Issue" value={metrics.new_issues} />
+                    <MetricRow label="Commit" value={metrics.new_commits} />
+                    <MetricRow label="新增代码" value={metrics.lines_added} />
+                    <MetricRow label="删除代码" value={metrics.lines_deleted} />
+                </div>
+            )}
         </div>
     );
 };
