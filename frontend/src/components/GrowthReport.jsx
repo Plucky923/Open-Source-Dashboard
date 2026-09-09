@@ -21,6 +21,9 @@ const GrowthReport = ({ growthData, loading }) => {
     }
 
     const { period, growth } = growthData;
+    const comparisonAvailable = growthData.comparison_available !== false
+        && Boolean(period.previous)
+        && Boolean(growth);
 
     const getGrowthColor = (value) => {
         if (value > 10) return 'text-green-400';
@@ -43,58 +46,72 @@ const GrowthReport = ({ growthData, loading }) => {
             <h2 className="text-xl font-bold mb-6 text-white">增长趋势分析</h2>
             
             {/* Period Comparison Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className={`grid grid-cols-1 gap-4 ${comparisonAvailable ? 'md:grid-cols-2 mb-6' : ''}`}>
                 <PeriodCard 
                     title="当前周期" 
                     period={period.current}
                     highlight={true}
                 />
-                <PeriodCard 
-                    title="上一周期" 
-                    period={period.previous}
-                    highlight={false}
-                />
+                {comparisonAvailable && (
+                    <PeriodCard
+                        title="上一周期"
+                        period={period.previous}
+                        highlight={false}
+                    />
+                )}
             </div>
-            
-            {/* Growth Metrics */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <GrowthMetric 
-                    label="PR增长" 
-                    value={growth.prs}
-                    colorClass={getGrowthColor(growth.prs)}
-                    bgClass={getGrowthBgColor(growth.prs)}
-                />
-                <GrowthMetric 
-                    label="Issue 增长"
-                    value={growth.issues}
-                    colorClass={getGrowthColor(growth.issues)}
-                    bgClass={getGrowthBgColor(growth.issues)}
-                />
-                <GrowthMetric 
-                    label="Commit 增长"
-                    value={growth.commits}
-                    colorClass={getGrowthColor(growth.commits)}
-                    bgClass={getGrowthBgColor(growth.commits)}
-                />
-                <GrowthMetric 
-                    label="新增代码" 
-                    value={growth.lines_added}
-                    colorClass={getGrowthColor(growth.lines_added)}
-                    bgClass={getGrowthBgColor(growth.lines_added)}
-                />
-                <GrowthMetric 
-                    label="删除代码" 
-                    value={growth.lines_deleted}
-                    colorClass={getGrowthColor(growth.lines_deleted)}
-                    bgClass={getGrowthBgColor(growth.lines_deleted)}
-                />
-            </div>
+
+            {comparisonAvailable ? (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <GrowthMetric
+                        label="PR增长"
+                        value={growth.prs}
+                        colorClass={getGrowthColor(growth.prs)}
+                        bgClass={getGrowthBgColor(growth.prs)}
+                    />
+                    <GrowthMetric
+                        label="Issue 增长"
+                        value={growth.issues}
+                        colorClass={getGrowthColor(growth.issues)}
+                        bgClass={getGrowthBgColor(growth.issues)}
+                    />
+                    <GrowthMetric
+                        label="Commit 增长"
+                        value={growth.commits}
+                        colorClass={getGrowthColor(growth.commits)}
+                        bgClass={getGrowthBgColor(growth.commits)}
+                    />
+                    <GrowthMetric
+                        label="新增代码"
+                        value={growth.lines_added}
+                        colorClass={getGrowthColor(growth.lines_added)}
+                        bgClass={getGrowthBgColor(growth.lines_added)}
+                    />
+                    <GrowthMetric
+                        label="删除代码"
+                        value={growth.lines_deleted}
+                        colorClass={getGrowthColor(growth.lines_deleted)}
+                        bgClass={getGrowthBgColor(growth.lines_deleted)}
+                    />
+                </div>
+            ) : (
+                <p className="mt-4 rounded-lg border border-gray-700 bg-gray-900/40 px-4 py-3 text-sm text-gray-400">
+                    {growthData.comparison_unavailable_reason === 'unbounded_range'
+                        ? '全部时间范围不提供环比，请选择具体时间范围。'
+                        : growthData.comparison_unavailable_reason === 'incomplete_current_period'
+                            ? '当前周期数据不完整，暂不展示指标或环比。'
+                        : growthData.comparison_unavailable_reason === 'insufficient_history'
+                            ? '历史数据不足，暂不提供周期环比。'
+                            : '暂无足够数据进行周期对比。'}
+                </p>
+            )}
         </div>
     );
 };
 
 const PeriodCard = ({ title, period, highlight }) => {
     const { start, end, metrics } = period;
+    const hasCompleteDates = Boolean(start && end);
 
     return (
         <div className={`rounded-lg p-4 border ${
@@ -104,15 +121,17 @@ const PeriodCard = ({ title, period, highlight }) => {
         }`}>
             <h3 className="text-sm font-semibold mb-2 text-gray-300">{title}</h3>
             <p className="text-xs text-gray-400 mb-3">
-                {start} 至 {end}
+                {hasCompleteDates ? `${start} 至 ${end}` : '暂无数据'}
             </p>
-            <div className="space-y-1.5">
-                <MetricRow label="PR" value={metrics.new_prs} />
-                <MetricRow label="Issue" value={metrics.new_issues} />
-                <MetricRow label="Commit" value={metrics.new_commits} />
-                <MetricRow label="新增代码" value={metrics.lines_added} />
-                <MetricRow label="删除代码" value={metrics.lines_deleted} />
-            </div>
+            {hasCompleteDates && metrics && (
+                <div className="space-y-1.5">
+                    <MetricRow label="PR" value={metrics.new_prs} />
+                    <MetricRow label="Issue" value={metrics.new_issues} />
+                    <MetricRow label="Commit" value={metrics.new_commits} />
+                    <MetricRow label="新增代码" value={metrics.lines_added} />
+                    <MetricRow label="删除代码" value={metrics.lines_deleted} />
+                </div>
+            )}
         </div>
     );
 };
