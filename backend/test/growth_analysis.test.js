@@ -157,6 +157,25 @@ test('returns no data when an anchored SIG has no snapshots', () => {
     );
 });
 
+test('rejects a SIG snapshot newer than the organization anchor', () => {
+    assert.deepEqual(
+        buildComparisonPeriods('30d', '2026-09-09', '2026-09-08', ['2026-09-09']),
+        {
+            comparison_available: false,
+            reason: 'incomplete_current_period',
+            current: { start: null, end: null },
+            previous: null,
+        },
+    );
+});
+
+test('rejects reversed export period dates', () => {
+    assert.equal(
+        hasCompletePeriodDates({ start: '2026-09-09', end: '2026-09-08' }),
+        false,
+    );
+});
+
 test('supports leap-day date arithmetic and defaults unknown ranges to thirty days', () => {
     assert.equal(getRangeDays('unknown'), 30);
     assert.deepEqual(

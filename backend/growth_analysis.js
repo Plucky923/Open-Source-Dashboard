@@ -45,6 +45,15 @@ function buildComparisonPeriods(range, firstSnapshotDate, latestSnapshotDate, sn
         };
     }
 
+    if (firstDate && firstDate > latestDate) {
+        return {
+            comparison_available: false,
+            reason: 'incomplete_current_period',
+            current: { start: null, end: null },
+            previous: null,
+        };
+    }
+
     const days = getRangeDays(range);
     if (days === null) {
         if (availableDates) {
@@ -147,7 +156,7 @@ function calculateGrowthMetrics(current, previous) {
 }
 
 function hasCompletePeriodDates(period) {
-    return Boolean(period?.start && period?.end);
+    return Boolean(period?.start && period?.end && period.start <= period.end);
 }
 
 module.exports = {
