@@ -4,7 +4,6 @@ import api from '../services/api';
 const ExportMenu = ({ type = 'org', range = '30d', sigIds = [], granularity = 'day', summary = {}, growthData = {}, sigData = [], contributors = [], timeseries = [] }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [exporting, setExporting] = useState(false);
-    const [exportingFormat, setExportingFormat] = useState(null);
 
     const downloadFile = (blob, filename) => {
         const url = window.URL.createObjectURL(blob);
@@ -20,7 +19,6 @@ const ExportMenu = ({ type = 'org', range = '30d', sigIds = [], granularity = 'd
 
     const handleExport = async (format) => {
         setExporting(true);
-        setExportingFormat(format);
 
         try {
             if (format === 'csv') {
@@ -83,7 +81,6 @@ const ExportMenu = ({ type = 'org', range = '30d', sigIds = [], granularity = 'd
             alert('导出失败：' + (error.response?.data?.error || error.message));
         } finally {
             setExporting(false);
-            setExportingFormat(null);
         }
     };
 
@@ -161,4 +158,3 @@ const ExportMenu = ({ type = 'org', range = '30d', sigIds = [], granularity = 'd
 };
 
 export default ExportMenu;
-
