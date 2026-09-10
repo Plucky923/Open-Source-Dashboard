@@ -8,6 +8,9 @@
     "test": "node --test",
     "sync-repository-sigs": "node sync_repository_sigs.js --flush-cache"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "keywords": [
     "node",
     "express",

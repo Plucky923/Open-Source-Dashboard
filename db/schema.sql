@@ -6,7 +6,8 @@ SET client_encoding = 'UTF8';
 CREATE TABLE organizations (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_ingestion_completed_at TIMESTAMPTZ
 );
 
 -- Table: special_interest_groups
@@ -23,8 +24,8 @@ CREATE TABLE special_interest_groups (
 
 -- Table: repositories
 -- 重点仓库表
--- owner_login: 仓库实际所属的 GitHub 账号/组织；对上游仓库（如 rustsbi org）
--- 与仪表盘组织（hust-open-atom-club）不同。commit 统计一律取默认分支。
+-- owner_login: 仓库实际所属的 GitHub 账号/组织；对关联组织仓库（如 rustsbi
+-- org）与仪表盘组织（hust-open-atom-club）不同。commit 统计一律取默认分支。
 CREATE TABLE repositories (
     id SERIAL PRIMARY KEY,
     org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -32,7 +33,7 @@ CREATE TABLE repositories (
     github_id BIGINT UNIQUE, -- Stable GitHub repository identity, preserved across renames
     is_in_organization BOOLEAN NOT NULL DEFAULT TRUE, -- False retains history for repositories no longer in the GitHub organization
     name VARCHAR(255) NOT NULL, -- 仓库名称，如 hust-mirrors
-    owner_login VARCHAR(255) NOT NULL DEFAULT 'hust-open-atom-club', -- GitHub owner（组织或用户），上游仓库时与 org 不同
+    owner_login VARCHAR(255) NOT NULL DEFAULT 'hust-open-atom-club', -- GitHub owner（组织或用户），关联组织仓库时与 org 不同
     description TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT repositories_org_owner_name_unique UNIQUE (org_id, owner_login, name)
@@ -101,11 +102,11 @@ CREATE INDEX idx_activity_snapshots_org_date ON activity_snapshots (org_id, snap
 CREATE INDEX idx_sig_snapshots_sig_date ON sig_snapshots (sig_id, snapshot_date);
 CREATE INDEX idx_repo_snapshots_repo_date ON repo_snapshots (repo_id, snapshot_date);
 
--- Table: upstream_org_trackings
--- 关联 GitHub 组织配置：这些组织的仓库通过 GitHub topic osd-sig-<slug>
--- （如 osd-sig-r2）声明归属 SIG，携带该 topic 的仓库会被跟踪；
--- 未携带 topic 的仓库不跟踪。commit 统计与其他仓库一样取默认分支。
-CREATE TABLE upstream_org_trackings (
+-- Table: associated_org_trackings
+-- 关联 GitHub 组织配置：这些组织的仓库通过与仪表盘组织相同的 osd_sig
+-- Custom Property（值如 r2）声明归属 SIG；未声明或值为 untracked 的仓库
+-- 不跟踪，私有仓库原则上不跟踪。commit 统计与其他仓库一样取默认分支。
+CREATE TABLE associated_org_trackings (
     owner_login VARCHAR(255) PRIMARY KEY, -- 关联组织登录名，如 rustsbi
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()

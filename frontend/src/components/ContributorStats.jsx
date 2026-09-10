@@ -1,15 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getContributorStats } from '../services/api';
 
 const ContributorStats = ({ range = '30d' }) => {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchStats();
-    }, [range]);
-
-    const fetchStats = async () => {
+    const fetchStats = useCallback(async () => {
         setLoading(true);
         try {
             const data = await getContributorStats(range);
@@ -19,7 +15,11 @@ const ContributorStats = ({ range = '30d' }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [range]);
+
+    useEffect(() => {
+        fetchStats();
+    }, [fetchStats]);
 
     if (loading) {
         return (
@@ -99,4 +99,3 @@ const StatCard = ({ title, value, icon, color, subtitle }) => {
 };
 
 export default ContributorStats;
-

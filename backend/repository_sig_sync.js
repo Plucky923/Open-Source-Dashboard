@@ -410,8 +410,9 @@ async function applyRepositorySigAssignments({ pool, assignments, orgName = DEFA
         );
 
         // Custom Property assignments only govern repositories owned by the
-        // dashboard organization; upstream rows (owner_login != orgName) are
-        // managed by upstream_repository_sync and must not be disabled here.
+        // dashboard organization; associated-org rows (owner_login != orgName)
+        // are managed by associated_repository_sync and must not be disabled
+        // here.
         const isClubOwned = (repository) => (repository.owner_login || orgName) === orgName;
 
         const existingByName = new Map();

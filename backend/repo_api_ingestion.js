@@ -32,7 +32,8 @@ async function collectAndPersistRepoApiStats({
     persistRepoApiStats = defaultPersistRepoApiStats,
 }) {
     // Search queries address the repository by its GitHub owner, which for
-    // upstream repositories differs from the dashboard organization.
+    // associated-organization repositories differs from the dashboard
+    // organization.
     const repositoryOwner = ownerLogin || orgName;
     const repoQuery = `repo:${repositoryOwner}/${repoName}`;
 

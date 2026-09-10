@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getContributorLeaderboard } from '../services/api';
 import ContributorDetailModal from './ContributorDetailModal';
 
@@ -8,11 +8,7 @@ const ContributorLeaderboard = ({ range = '30d' }) => {
     const [metric, setMetric] = useState('total');
     const [selectedContributor, setSelectedContributor] = useState(null);
 
-    useEffect(() => {
-        fetchLeaderboard();
-    }, [range, metric]);
-
-    const fetchLeaderboard = async () => {
+    const fetchLeaderboard = useCallback(async () => {
         setLoading(true);
         try {
             const data = await getContributorLeaderboard(range, metric, 20);
@@ -22,7 +18,11 @@ const ContributorLeaderboard = ({ range = '30d' }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [range, metric]);
+
+    useEffect(() => {
+        fetchLeaderboard();
+    }, [fetchLeaderboard]);
 
     const metrics = [
         { value: 'total', label: '总活动', icon: '🏆', key: 'total_activities', color: 'text-blue-400' },

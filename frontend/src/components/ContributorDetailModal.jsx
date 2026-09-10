@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getContributorDetails } from '../services/api';
 
 const ContributorDetailModal = ({ username, range, onClose }) => {
@@ -6,13 +6,7 @@ const ContributorDetailModal = ({ username, range, onClose }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
-        if (username) {
-            fetchDetails();
-        }
-    }, [username, range]);
-
-    const fetchDetails = async () => {
+    const fetchDetails = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
@@ -24,7 +18,13 @@ const ContributorDetailModal = ({ username, range, onClose }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [username, range]);
+
+    useEffect(() => {
+        if (username) {
+            fetchDetails();
+        }
+    }, [username, fetchDetails]);
 
     // Handle escape key
     useEffect(() => {

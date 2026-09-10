@@ -7,7 +7,7 @@ const {
     DEFAULT_PROPERTY_NAME,
     syncRepositorySigsFromGitHub,
 } = require('./repository_sig_sync');
-const { syncUpstreamOrgRepositories } = require('./upstream_repository_sync');
+const { syncAssociatedOrgRepositories } = require('./associated_repository_sync');
 
 async function main() {
     const pool = new Pool({
@@ -27,7 +27,7 @@ async function main() {
             propertyName: process.env.GITHUB_SIG_PROPERTY || DEFAULT_PROPERTY_NAME,
         });
 
-        const upstreamResult = await syncUpstreamOrgRepositories({
+        const associatedResult = await syncAssociatedOrgRepositories({
             pool,
             githubToken: process.env.GITHUB_TOKEN,
             orgName: process.env.GITHUB_ORG || DEFAULT_ORG_NAME,
@@ -35,10 +35,10 @@ async function main() {
 
         console.log(JSON.stringify({
             ...result,
-            upstream: upstreamResult,
+            associated: associatedResult,
         }, null, 2));
 
-        if ((result.changes.length > 0 || upstreamResult.changes.length > 0) && process.argv.includes('--flush-cache')) {
+        if ((result.changes.length > 0 || associatedResult.changes.length > 0) && process.argv.includes('--flush-cache')) {
             redisClient = Redis.createClient({
                 url: process.env.REDIS_URL || 'redis://localhost:6379',
             });

@@ -20,7 +20,7 @@ const {
     DEFAULT_PROPERTY_NAME,
     syncRepositorySigsFromGitHub,
 } = require('./repository_sig_sync');
-const { syncUpstreamOrgRepositories } = require('./upstream_repository_sync');
+const { syncAssociatedOrgRepositories } = require('./associated_repository_sync');
 const { runPromisesWithConcurrency } = require('./promise_concurrency');
 const {
     MAX_RATE_LIMIT_RETRIES,
@@ -32,6 +32,24 @@ const {
     storeContributorActivities: persistContributorActivities,
 } = require('./contributor_api_stats');
 const { collectAndPersistRepoApiStats } = require('./repo_api_ingestion');
+const {
+    REPOSITORY_INSIGHTS_SQL,
+    invalidateRepositoryInsightCache,
+    mapRepositoryInsightRows,
+} = require('./repository_insights');
+const {
+    buildOrganizationSummaryCacheKey,
+    invalidateOrganizationSummaryCache,
+    normalizeTimestamp,
+    recordSuccessfulIngestion,
+    withDataFreshness,
+} = require('./data_freshness');
+const {
+    buildComparisonPeriods,
+    calculateGrowthMetrics,
+    formatGrowthMetrics,
+    hasCompletePeriodDates,
+} = require('./growth_analysis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -155,27 +173,33 @@ async function synchronizeRepositoryMetadata() {
         `${result.tracked} tracked, ${result.untracked} untracked, ${result.changes.length} changed.`
     );
 
-    // Upstream organizations (outside hust-open-atom-club) are enumerated
-    // from upstream_org_trackings; they cannot carry the osd_sig property.
-    const upstreamResult = await syncUpstreamOrgRepositories({
+    // Associated organizations (outside hust-open-atom-club) are enumerated
+    // from associated_org_trackings; their public repositories declare SIG
+    // membership through the osd_sig Custom Property.
+    const associatedResult = await syncAssociatedOrgRepositories({
         pool,
         githubToken: GITHUB_TOKEN,
         orgName: ORG_NAME,
     });
 
     console.log(
-        `[Upstream Org Sync] ${upstreamResult.configurations} organization(s), ` +
-        `${upstreamResult.repositories} repositories: ` +
-        `${upstreamResult.created} created, ${upstreamResult.disabled} disabled, ` +
-        `${upstreamResult.changes.length} changed.`
+        `[Associated Org Sync] ${associatedResult.configurations} organization(s), ` +
+        `${associatedResult.repositories} repositories: ` +
+        `${associatedResult.created} created, ${associatedResult.disabled} disabled, ` +
+        `${associatedResult.changes.length} changed.` +
+        (associatedResult.perOwner.some((result) => result.skippedPrivate.length > 0)
+            ? ` Skipped private repositories: ${associatedResult.perOwner
+                .flatMap((result) => result.skippedPrivate.map((name) => `${result.ownerLogin}/${name}`))
+                .join(', ')}.`
+            : '')
     );
 
-    if ((result.changes.length > 0 || upstreamResult.changes.length > 0) && redisClient.isOpen) {
+    if ((result.changes.length > 0 || associatedResult.changes.length > 0) && redisClient.isOpen) {
         await redisClient.flushAll();
         console.log('[Repository SIG Sync] Redis cache cleared after historical re-aggregation.');
     }
 
-    return { ...result, upstream: upstreamResult };
+    return { ...result, associated: associatedResult };
 }
 
 async function retryWithBackoff(fn, retries = 3, delayMs = 1000) {
@@ -577,7 +601,7 @@ async function storeRepoApiStatsForDate(repoId, repoName, dateStr, stats, contri
 async function fetchAndStoreRepoCommitStats(repo, targetDate) {
     const ownerLogin = repo.owner_login || ORG_NAME;
     // Commit statistics always come from the repository's default branch,
-    // uniformly for club and upstream repositories.
+    // uniformly for club and associated-organization repositories.
     const commitStats = await fetchCommitsViaGraphQL(repo.name, targetDate, githubGraphQL, ownerLogin);
     await storeRepoCommitStats(repo.id, repo.name, targetDate, commitStats);
 }
@@ -743,6 +767,9 @@ async function refreshCache() {
             console.log('Organization not found. Skipping cache refresh.');
             return;
         }
+
+        const invalidatedRepositoryCacheKeys = await invalidateRepositoryInsightCache(redisClient, ORG_NAME);
+        console.log(`Invalidated ${invalidatedRepositoryCacheKeys} repository insight cache keys`);
 
         // 刷新组织时间序列数据（30天）
         const range = '30d';
@@ -952,6 +979,10 @@ async function runDailyIngestionJob() {
         );
         console.log(`[aggregation] organization@${targetDateStr}: saved snapshot (id=${result.rows[0].id})`);
         console.log(`Successfully stored organization snapshot for ${ORG_NAME} on ${targetDateStr}.`);
+
+        await recordSuccessfulIngestion(pool, org.id);
+        const invalidatedSummaryCacheKeys = await invalidateOrganizationSummaryCache(redisClient, ORG_NAME);
+        console.log(`Invalidated ${invalidatedSummaryCacheKeys} organization summary cache keys.`);
 
         console.log('--- Daily Data Ingestion Job Finished Successfully ---');
 
@@ -1337,7 +1368,10 @@ cron.schedule('0 */6 * * *', runDailyIngestionJob); // Every 6 hours for testing
 
 // Helper function for security check (now simplified for single org)
 async function getMonitoredOrg() {
-    const orgResult = await pool.query("SELECT id, name FROM organizations WHERE name = $1", [ORG_NAME]);
+    const orgResult = await pool.query(
+        "SELECT id, name, last_ingestion_completed_at FROM organizations WHERE name = $1",
+        [ORG_NAME],
+    );
     return orgResult.rows[0];
 }
 
@@ -1353,6 +1387,39 @@ app.get('/api/v1/organization/sigs', async (req, res) => {
         res.json(sigsResult.rows);
     } catch (error) {
         console.error('Error fetching SIGs:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// GET /api/v1/organization/repositories - Repository-level activity in a selected range
+app.get('/api/v1/organization/repositories', async (req, res) => {
+    const range = req.query.range || '30d';
+    const cacheKey = `org:${ORG_NAME}:repositories:range:${range}`;
+    const cacheTTL = 60 * 10;
+
+    try {
+        const org = await getMonitoredOrg();
+        if (!org) {
+            return res.status(404).json({ error: 'Monitored organization not found.' });
+        }
+
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData));
+        }
+
+        const { startDateStr } = parseRange(range);
+        const result = await pool.query(REPOSITORY_INSIGHTS_SQL, [org.id, startDateStr]);
+        const repositories = mapRepositoryInsightRows(result.rows, ORG_NAME);
+        const responseData = {
+            range,
+            repositories,
+        };
+
+        await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(responseData));
+        res.json(responseData);
+    } catch (error) {
+        console.error('Error fetching repository insights:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
@@ -1405,7 +1472,6 @@ app.get('/api/v1/organization/timeseries', async (req, res) => {
 app.get('/api/v1/organization/summary', async (req, res) => {
     // 默认30天，允许通过查询参数更改，例如 /summary?range=7d
     const range = req.query.range || '30d';
-    const cacheKey = `org:${ORG_NAME}:summary:range:${range}`;
     const cacheTTL = 60 * 10; // 缓存10分钟
 
     try {
@@ -1413,12 +1479,17 @@ app.get('/api/v1/organization/summary', async (req, res) => {
         if (!org) {
             return res.status(404).json({ error: 'Monitored organization not found.' });
         }
+        const cacheKey = buildOrganizationSummaryCacheKey(
+            ORG_NAME,
+            range,
+            org.last_ingestion_completed_at,
+        );
 
         // 1. 检查缓存
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             console.log(`Cache hit for summary: ${cacheKey}`);
-            return res.json(JSON.parse(cachedData));
+            return res.json(withDataFreshness(JSON.parse(cachedData)));
         }
         console.log(`Cache miss for summary: ${cacheKey}. Querying DB...`);
 
@@ -1469,13 +1540,14 @@ app.get('/api/v1/organization/summary', async (req, res) => {
             active_contributors: parseInt(contributorCountResult.rows[0].unique_contributors, 10),
             days_counted: parseInt(summaryResult.rows[0].days_counted, 10),
             range_days: days, // 在响应中包含请求的范围
+            last_updated_at: normalizeTimestamp(org.last_ingestion_completed_at),
         };
 
         // 4. 存入缓存并返回
         await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(summaryData));
         console.log(`Summary data stored in cache for ${cacheKey}.`);
 
-        res.json(summaryData);
+        res.json(withDataFreshness(summaryData));
 
     } catch (error) {
         console.error(`Error fetching summary data for organization:`, error.message);
@@ -2081,7 +2153,6 @@ app.get('/api/v1/sigs/compare', async (req, res) => {
 // GET /api/v1/organization/growth-analysis - Growth analysis for organization
 app.get('/api/v1/organization/growth-analysis', async (req, res) => {
     const range = req.query.range || '30d';
-    const cacheKey = `org:${ORG_NAME}:growth:${range}`;
     const cacheTTL = 60 * 10;
 
     try {
@@ -2090,7 +2161,26 @@ app.get('/api/v1/organization/growth-analysis', async (req, res) => {
             return res.status(404).json({ error: 'Monitored organization not found.' });
         }
 
-        // Check cache
+        const boundsResult = await pool.query(
+            `SELECT MIN(snapshot_date) AS first_snapshot_date,
+                    MAX(snapshot_date) AS latest_snapshot_date,
+                    COALESCE(
+                        ARRAY_AGG(snapshot_date::TEXT ORDER BY snapshot_date),
+                        ARRAY[]::TEXT[]
+                    ) AS snapshot_dates
+             FROM activity_snapshots
+             WHERE org_id = $1`,
+            [org.id]
+        );
+        const bounds = boundsResult.rows[0];
+        const periods = buildComparisonPeriods(
+            range,
+            bounds.first_snapshot_date ? formatDate(bounds.first_snapshot_date) : null,
+            bounds.latest_snapshot_date ? formatDate(bounds.latest_snapshot_date) : null,
+            bounds.snapshot_dates,
+        );
+        const cacheKey = `org:${ORG_NAME}:growth:v3:${range}:window:${periods.current.start || 'missing'}:${periods.current.end || 'missing'}:coverage:${bounds.snapshot_dates.length}`;
+
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             console.log(`Cache hit for ${cacheKey}`);
@@ -2098,92 +2188,58 @@ app.get('/api/v1/organization/growth-analysis', async (req, res) => {
         }
         console.log(`Cache miss for ${cacheKey}. Querying DB...`);
 
-        const { startDateStr, days } = parseRange(range);
+        let current = null;
+        if (hasCompletePeriodDates(periods.current)) {
+            const currentResult = await pool.query(
+                `SELECT
+                    COALESCE(SUM(new_prs), 0) as new_prs,
+                    COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
+                    COALESCE(SUM(new_issues), 0) as new_issues,
+                    COALESCE(SUM(closed_issues), 0) as closed_issues,
+                    COALESCE(SUM(new_commits), 0) as new_commits,
+                    COALESCE(SUM(lines_added), 0) as lines_added,
+                    COALESCE(SUM(lines_deleted), 0) as lines_deleted
+                 FROM activity_snapshots
+                 WHERE org_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
+                [org.id, periods.current.start, periods.current.end]
+            );
+            current = formatGrowthMetrics(currentResult.rows[0]);
+        }
+        let previous = null;
+        let growth = null;
 
-        // Calculate current period
-        const currentEndDate = new Date();
-        currentEndDate.setHours(0, 0, 0, 0);
-        const currentStartDate = new Date(currentEndDate);
-        currentStartDate.setDate(currentEndDate.getDate() - days);
-
-        // Calculate previous period
-        const previousEndDate = new Date(currentStartDate);
-        previousEndDate.setDate(previousEndDate.getDate() - 1);
-        const previousStartDate = new Date(previousEndDate);
-        previousStartDate.setDate(previousEndDate.getDate() - days);
-
-        // Query current period
-        const currentResult = await pool.query(
-            `SELECT 
-                COALESCE(SUM(new_prs), 0) as new_prs,
-                COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
-                COALESCE(SUM(new_issues), 0) as new_issues,
-                COALESCE(SUM(closed_issues), 0) as closed_issues,
-                COALESCE(SUM(new_commits), 0) as new_commits,
-                COALESCE(SUM(lines_added), 0) as lines_added,
-                COALESCE(SUM(lines_deleted), 0) as lines_deleted
-             FROM activity_snapshots
-             WHERE org_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
-            [org.id, formatDate(currentStartDate), formatDate(currentEndDate)]
-        );
-
-        // Query previous period
-        const previousResult = await pool.query(
-            `SELECT 
-                COALESCE(SUM(new_prs), 0) as new_prs,
-                COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
-                COALESCE(SUM(new_issues), 0) as new_issues,
-                COALESCE(SUM(closed_issues), 0) as closed_issues,
-                COALESCE(SUM(new_commits), 0) as new_commits,
-                COALESCE(SUM(lines_added), 0) as lines_added,
-                COALESCE(SUM(lines_deleted), 0) as lines_deleted
-             FROM activity_snapshots
-             WHERE org_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
-            [org.id, formatDate(previousStartDate), formatDate(previousEndDate)]
-        );
-
-        const current = currentResult.rows[0];
-        const previous = previousResult.rows[0];
-
-        // Calculate growth rates
-        const calculateGrowth = (curr, prev) => {
-            if (prev === 0) return curr > 0 ? 100 : 0;
-            return ((curr - prev) / prev * 100).toFixed(2);
-        };
-
-        const growth = {
-            prs: parseFloat(calculateGrowth(parseInt(current.new_prs), parseInt(previous.new_prs))),
-            issues: parseFloat(calculateGrowth(parseInt(current.new_issues), parseInt(previous.new_issues))),
-            commits: parseFloat(calculateGrowth(parseInt(current.new_commits), parseInt(previous.new_commits))),
-            lines_added: parseFloat(calculateGrowth(parseInt(current.lines_added), parseInt(previous.lines_added))),
-            lines_deleted: parseFloat(calculateGrowth(parseInt(current.lines_deleted), parseInt(previous.lines_deleted)))
-        };
-
-        // Convert bigint to number for JSON
-        const formatMetrics = (data) => ({
-            new_prs: parseInt(data.new_prs),
-            closed_merged_prs: parseInt(data.closed_merged_prs),
-            new_issues: parseInt(data.new_issues),
-            closed_issues: parseInt(data.closed_issues),
-            new_commits: parseInt(data.new_commits),
-            lines_added: parseInt(data.lines_added),
-            lines_deleted: parseInt(data.lines_deleted)
-        });
+        if (periods.comparison_available) {
+            const previousResult = await pool.query(
+                `SELECT
+                    COALESCE(SUM(new_prs), 0) as new_prs,
+                    COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
+                    COALESCE(SUM(new_issues), 0) as new_issues,
+                    COALESCE(SUM(closed_issues), 0) as closed_issues,
+                    COALESCE(SUM(new_commits), 0) as new_commits,
+                    COALESCE(SUM(lines_added), 0) as lines_added,
+                    COALESCE(SUM(lines_deleted), 0) as lines_deleted
+                 FROM activity_snapshots
+                 WHERE org_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
+                [org.id, periods.previous.start, periods.previous.end]
+            );
+            previous = formatGrowthMetrics(previousResult.rows[0]);
+            growth = calculateGrowthMetrics(current, previous);
+        }
 
         const responseData = {
+            comparison_available: periods.comparison_available,
+            comparison_unavailable_reason: periods.reason,
             period: {
                 current: {
-                    start: formatDate(currentStartDate),
-                    end: formatDate(currentEndDate),
-                    metrics: formatMetrics(current)
+                    ...periods.current,
+                    metrics: current,
                 },
-                previous: {
-                    start: formatDate(previousStartDate),
-                    end: formatDate(previousEndDate),
-                    metrics: formatMetrics(previous)
-                }
+                previous: periods.previous ? {
+                    ...periods.previous,
+                    metrics: previous,
+                } : null,
             },
-            growth: growth
+            growth,
         };
 
         await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(responseData));
@@ -2199,16 +2255,35 @@ app.get('/api/v1/organization/growth-analysis', async (req, res) => {
 app.get('/api/v1/sig/:sigId/growth-analysis', async (req, res) => {
     const { sigId } = req.params;
     const range = req.query.range || '30d';
-    const cacheKey = `sig:${sigId}:growth:${range}`;
     const cacheTTL = 60 * 10;
 
     try {
-        const sigResult = await pool.query('SELECT id, name FROM special_interest_groups WHERE id = $1', [sigId]);
+        const sigResult = await pool.query('SELECT id, name, org_id FROM special_interest_groups WHERE id = $1', [sigId]);
         if (sigResult.rows.length === 0) {
             return res.status(404).json({ error: 'Monitored SIG not found.' });
         }
 
-        // Check cache
+        const boundsResult = await pool.query(
+            `SELECT
+                (SELECT MIN(snapshot_date) FROM sig_snapshots WHERE sig_id = $2) AS first_snapshot_date,
+                MAX(snapshot_date) AS latest_snapshot_date,
+                (SELECT COALESCE(
+                    ARRAY_AGG(snapshot_date::TEXT ORDER BY snapshot_date),
+                    ARRAY[]::TEXT[]
+                 ) FROM sig_snapshots WHERE sig_id = $2) AS snapshot_dates
+             FROM activity_snapshots
+             WHERE org_id = $1`,
+            [sigResult.rows[0].org_id, sigId]
+        );
+        const bounds = boundsResult.rows[0];
+        const periods = buildComparisonPeriods(
+            range,
+            bounds.first_snapshot_date ? formatDate(bounds.first_snapshot_date) : null,
+            bounds.latest_snapshot_date ? formatDate(bounds.latest_snapshot_date) : null,
+            bounds.snapshot_dates,
+        );
+        const cacheKey = `sig:${sigId}:growth:v3:${range}:window:${periods.current.start || 'missing'}:${periods.current.end || 'missing'}:coverage:${bounds.snapshot_dates.length}`;
+
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             console.log(`Cache hit for ${cacheKey}`);
@@ -2216,91 +2291,62 @@ app.get('/api/v1/sig/:sigId/growth-analysis', async (req, res) => {
         }
         console.log(`Cache miss for ${cacheKey}. Querying DB...`);
 
-        const { startDateStr, days } = parseRange(range);
+        let current = null;
+        if (hasCompletePeriodDates(periods.current)) {
+            const currentResult = await pool.query(
+                `SELECT
+                    COALESCE(SUM(new_prs), 0) as new_prs,
+                    COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
+                    COALESCE(SUM(new_issues), 0) as new_issues,
+                    COALESCE(SUM(closed_issues), 0) as closed_issues,
+                    COALESCE(SUM(new_commits), 0) as new_commits,
+                    COALESCE(SUM(lines_added), 0) as lines_added,
+                    COALESCE(SUM(lines_deleted), 0) as lines_deleted
+                 FROM sig_snapshots
+                 WHERE sig_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
+                [sigId, periods.current.start, periods.current.end]
+            );
+            current = formatGrowthMetrics(currentResult.rows[0]);
+        }
+        let previous = null;
+        let growth = null;
 
-        // Calculate periods
-        const currentEndDate = new Date();
-        currentEndDate.setHours(0, 0, 0, 0);
-        const currentStartDate = new Date(currentEndDate);
-        currentStartDate.setDate(currentEndDate.getDate() - days);
-
-        const previousEndDate = new Date(currentStartDate);
-        previousEndDate.setDate(previousEndDate.getDate() - 1);
-        const previousStartDate = new Date(previousEndDate);
-        previousStartDate.setDate(previousEndDate.getDate() - days);
-
-        // Query current period
-        const currentResult = await pool.query(
-            `SELECT 
-                COALESCE(SUM(new_prs), 0) as new_prs,
-                COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
-                COALESCE(SUM(new_issues), 0) as new_issues,
-                COALESCE(SUM(closed_issues), 0) as closed_issues,
-                COALESCE(SUM(new_commits), 0) as new_commits,
-                COALESCE(SUM(lines_added), 0) as lines_added,
-                COALESCE(SUM(lines_deleted), 0) as lines_deleted
-             FROM sig_snapshots
-             WHERE sig_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
-            [sigId, formatDate(currentStartDate), formatDate(currentEndDate)]
-        );
-
-        // Query previous period
-        const previousResult = await pool.query(
-            `SELECT 
-                COALESCE(SUM(new_prs), 0) as new_prs,
-                COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
-                COALESCE(SUM(new_issues), 0) as new_issues,
-                COALESCE(SUM(closed_issues), 0) as closed_issues,
-                COALESCE(SUM(new_commits), 0) as new_commits,
-                COALESCE(SUM(lines_added), 0) as lines_added,
-                COALESCE(SUM(lines_deleted), 0) as lines_deleted
-             FROM sig_snapshots
-             WHERE sig_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
-            [sigId, formatDate(previousStartDate), formatDate(previousEndDate)]
-        );
-
-        const current = currentResult.rows[0];
-        const previous = previousResult.rows[0];
-
-        // Calculate growth rates
-        const calculateGrowth = (curr, prev) => {
-            if (prev === 0) return curr > 0 ? 100 : 0;
-            return ((curr - prev) / prev * 100).toFixed(2);
-        };
-
-        const growth = {
-            prs: parseFloat(calculateGrowth(parseInt(current.new_prs), parseInt(previous.new_prs))),
-            issues: parseFloat(calculateGrowth(parseInt(current.new_issues), parseInt(previous.new_issues))),
-            commits: parseFloat(calculateGrowth(parseInt(current.new_commits), parseInt(previous.new_commits))),
-            lines_added: parseFloat(calculateGrowth(parseInt(current.lines_added), parseInt(previous.lines_added))),
-            lines_deleted: parseFloat(calculateGrowth(parseInt(current.lines_deleted), parseInt(previous.lines_deleted)))
-        };
-
-        const formatMetrics = (data) => ({
-            new_prs: parseInt(data.new_prs),
-            closed_merged_prs: parseInt(data.closed_merged_prs),
-            new_issues: parseInt(data.new_issues),
-            closed_issues: parseInt(data.closed_issues),
-            new_commits: parseInt(data.new_commits),
-            lines_added: parseInt(data.lines_added),
-            lines_deleted: parseInt(data.lines_deleted)
-        });
+        if (periods.comparison_available) {
+            const previousResult = await pool.query(
+                `SELECT
+                    COALESCE(SUM(new_prs), 0) as new_prs,
+                    COALESCE(SUM(closed_merged_prs), 0) as closed_merged_prs,
+                    COALESCE(SUM(new_issues), 0) as new_issues,
+                    COALESCE(SUM(closed_issues), 0) as closed_issues,
+                    COALESCE(SUM(new_commits), 0) as new_commits,
+                    COALESCE(SUM(lines_added), 0) as lines_added,
+                    COALESCE(SUM(lines_deleted), 0) as lines_deleted
+                 FROM sig_snapshots
+                 WHERE sig_id = $1 AND snapshot_date >= $2 AND snapshot_date <= $3`,
+                [sigId, periods.previous.start, periods.previous.end]
+            );
+            previous = formatGrowthMetrics(previousResult.rows[0]);
+            growth = calculateGrowthMetrics(current, previous);
+        }
 
         const responseData = {
-            sig: sigResult.rows[0],
+            sig: {
+                id: sigResult.rows[0].id,
+                name: sigResult.rows[0].name,
+            },
+            comparison_available: periods.comparison_available,
+            comparison_unavailable_reason: periods.reason,
             period: {
                 current: {
-                    start: formatDate(currentStartDate),
-                    end: formatDate(currentEndDate),
-                    metrics: formatMetrics(current)
+                    ...periods.current,
+                    metrics: current,
                 },
-                previous: {
-                    start: formatDate(previousStartDate),
-                    end: formatDate(previousEndDate),
-                    metrics: formatMetrics(previous)
-                }
+                previous: periods.previous ? {
+                    ...periods.previous,
+                    metrics: previous,
+                } : null,
             },
-            growth: growth
+            growth,
         };
 
         await redisClient.setEx(cacheKey, cacheTTL, JSON.stringify(responseData));
@@ -2731,17 +2777,31 @@ app.post('/api/v1/export/pdf', async (req, res) => {
             doc.moveDown();
             doc.fontSize(11);
 
-            doc.text(`当前周期: ${growthData.period.current.start} 至 ${growthData.period.current.end}`);
-            if (growthData.period.current.metrics) {
-                const curr = growthData.period.current.metrics;
-                doc.text(`  PRs: ${curr.new_prs}, Issues: ${curr.new_issues}, Commits: ${curr.new_commits}`);
-            }
-            doc.moveDown(0.5);
+            if (!hasCompletePeriodDates(growthData.period.current)) {
+                doc.text(growthData.comparison_unavailable_reason === 'incomplete_current_period'
+                    ? '当前周期数据不完整，暂不展示指标或环比'
+                    : '暂无数据，无法进行周期对比');
+            } else {
+                doc.text(`当前周期: ${growthData.period.current.start} 至 ${growthData.period.current.end}`);
+                if (growthData.period.current.metrics) {
+                    const curr = growthData.period.current.metrics;
+                    doc.text(`  PRs: ${curr.new_prs}, Issues: ${curr.new_issues}, Commits: ${curr.new_commits}`);
+                }
+                doc.moveDown(0.5);
 
-            doc.text(`上一周期: ${growthData.period.previous.start} 至 ${growthData.period.previous.end}`);
-            if (growthData.period.previous.metrics) {
-                const prev = growthData.period.previous.metrics;
-                doc.text(`  PRs: ${prev.new_prs}, Issues: ${prev.new_issues}, Commits: ${prev.new_commits}`);
+                if (growthData.period.previous) {
+                    doc.text(`上一周期: ${growthData.period.previous.start} 至 ${growthData.period.previous.end}`);
+                } else if (growthData.comparison_unavailable_reason === 'unbounded_range') {
+                    doc.text('全部时间范围不提供环比');
+                } else if (growthData.comparison_unavailable_reason === 'insufficient_history') {
+                    doc.text('历史数据不足，暂不提供周期环比');
+                } else {
+                    doc.text('暂无数据，无法进行周期对比');
+                }
+                if (growthData.period.previous?.metrics) {
+                    const prev = growthData.period.previous.metrics;
+                    doc.text(`  PRs: ${prev.new_prs}, Issues: ${prev.new_issues}, Commits: ${prev.new_commits}`);
+                }
             }
             doc.moveDown(1.5);
         }

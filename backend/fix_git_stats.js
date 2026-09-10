@@ -9,7 +9,7 @@ const {
     DEFAULT_PROPERTY_NAME,
     syncRepositorySigsFromGitHub,
 } = require('./repository_sig_sync');
-const { syncUpstreamOrgRepositories } = require('./upstream_repository_sync');
+const { syncAssociatedOrgRepositories } = require('./associated_repository_sync');
 const { persistRepoCommitStats } = require('./commit_author_stats');
 
 const ORG_NAME = 'hust-open-atom-club'; // 确保与主程序一致
@@ -104,7 +104,7 @@ async function runCommitStatsCorrection(daysToFix = 30) {
         orgName: ORG_NAME,
         propertyName: process.env.GITHUB_SIG_PROPERTY || DEFAULT_PROPERTY_NAME,
     });
-    await syncUpstreamOrgRepositories({
+    await syncAssociatedOrgRepositories({
         pool,
         githubToken: process.env.GITHUB_TOKEN,
         orgName: ORG_NAME,

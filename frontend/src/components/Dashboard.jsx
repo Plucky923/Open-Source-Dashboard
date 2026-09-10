@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     getOrgSummary,
     getAggregatedTimeseries,
@@ -18,7 +18,9 @@ import ContributorLeaderboard from './ContributorLeaderboard';
 import ContributorStats from './ContributorStats';
 import DayDetailModal from './DayDetailModal';
 import SIGContributorModal from './SIGContributorModal';
-import { useToast, ToastContainer } from './Toast';
+import RepositoryInsights from './RepositoryInsights';
+import { ToastContainer } from './Toast';
+import { useToast } from '../hooks/useToast';
 
 const Dashboard = () => {
     const [loading, setLoading] = useState(true);
@@ -32,6 +34,7 @@ const Dashboard = () => {
     const [growthLoading, setGrowthLoading] = useState(false);
     const [selectedSigIds, setSelectedSigIds] = useState([]);
     const [comparisonData, setComparisonData] = useState([]);
+    const [repositoryRefreshToken, setRepositoryRefreshToken] = useState(0);
     const { toasts, addToast, removeToast } = useToast();
 
     // Modal states
@@ -47,17 +50,19 @@ const Dashboard = () => {
         { key: 'commits', label: 'Commit', name: 'Commit', color: '#10b981' }
     ];
 
-    useEffect(() => {
-        fetchAllData();
-    }, [range, granularity]);
-
-    useEffect(() => {
-        if (selectedSigIds.length > 0) {
-            fetchComparisonData();
+    const fetchGrowthData = useCallback(async () => {
+        setGrowthLoading(true);
+        try {
+            const growth = await getGrowthAnalysis('org', null, range);
+            setGrowthData(growth);
+        } catch (error) {
+            console.error("Failed to load growth data", error);
+        } finally {
+            setGrowthLoading(false);
         }
-    }, [selectedSigIds, range, granularity]);
+    }, [range]);
 
-    const fetchAllData = async () => {
+    const fetchAllData = useCallback(async () => {
         setLoading(true);
         try {
             // 1. Fetch Org Summary, Aggregated Timeseries, and SIGs
@@ -119,21 +124,9 @@ const Dashboard = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [range, granularity, fetchGrowthData, addToast]);
 
-    const fetchGrowthData = async () => {
-        setGrowthLoading(true);
-        try {
-            const growth = await getGrowthAnalysis('org', null, range);
-            setGrowthData(growth);
-        } catch (error) {
-            console.error("Failed to load growth data", error);
-        } finally {
-            setGrowthLoading(false);
-        }
-    };
-
-    const fetchComparisonData = async () => {
+    const fetchComparisonData = useCallback(async () => {
         try {
             const data = await compareSigs(selectedSigIds, range, granularity);
             setComparisonData(data);
@@ -141,10 +134,21 @@ const Dashboard = () => {
             console.error("Failed to load comparison data", error);
             addToast('对比数据加载失败', 'error');
         }
-    };
+    }, [selectedSigIds, range, granularity, addToast]);
+
+    useEffect(() => {
+        fetchAllData();
+    }, [fetchAllData]);
+
+    useEffect(() => {
+        if (selectedSigIds.length > 0) {
+            fetchComparisonData();
+        }
+    }, [selectedSigIds, fetchComparisonData]);
 
     const handleRefresh = () => {
         addToast('正在刷新数据...', 'info', 1000);
+        setRepositoryRefreshToken((current) => current + 1);
         fetchAllData();
     };
 
@@ -236,6 +240,10 @@ const Dashboard = () => {
                         sigData={sigData}
                         timeseries={timeseries}
                     />
+                    <DataFreshness
+                        lastUpdatedAt={summary?.last_updated_at}
+                        status={summary?.data_status}
+                    />
                 </div>
             </div>
 
@@ -243,7 +251,7 @@ const Dashboard = () => {
             <section className="relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-950/80 via-gray-800 to-purple-950/60 p-6 md:p-8 mb-8 shadow-2xl shadow-blue-950/20">
                 <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" aria-hidden="true"></div>
                 <div className="absolute -bottom-28 right-1/3 h-56 w-56 rounded-full bg-purple-500/10 blur-3xl" aria-hidden="true"></div>
-                <div className="relative grid gap-8 xl:grid-cols-[1.35fr_1fr] xl:items-center">
+                <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] xl:items-center">
                     <div>
                         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.28em] text-blue-300">HUST Open Atom Club</p>
                         <h2 className="max-w-3xl text-2xl font-bold leading-tight text-white md:text-4xl">让每一次开源贡献，都被看见</h2>
@@ -274,16 +282,17 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-white/10 bg-gray-950/35 p-5 backdrop-blur-sm">
-                        <p className="text-sm font-semibold text-gray-200">看板范围</p>
-                        <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-white/10 bg-gray-950/35 p-5 backdrop-blur-sm md:p-7">
+                        <p className="text-base font-semibold text-gray-100">看板范围</p>
+                        <div className="mt-5 grid grid-cols-3 gap-3 md:gap-4">
                             <ScopeStat label="纳入统计" value={summary?.tracked_repositories} unit="个仓库" />
                             <ScopeStat label="组织仓库" value={summary?.organization_repositories} unit="个仓库" />
                             <ScopeStat label="技术小组" value={allSigs.length} unit="个 SIG" />
                         </div>
-                        <p className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-gray-400">
+                        <p className="mt-5 border-t border-white/10 pt-5 text-sm leading-6 text-gray-400">
                             统计范围以 GitHub 仓库的 <code className="text-blue-300">osd_sig</code> 属性为准。
-                            标记为 <code className="text-gray-300">untracked</code> 的仓库不进入汇总；fork 仓库可按所属 SIG 纳入。
+                            标记为 <code className="text-gray-300">untracked</code> 的仓库以及纯 Fork 仓库不进入数据汇总。
+                            看板默认每 6 小时更新一次。
                         </p>
                     </div>
                 </div>
@@ -333,15 +342,14 @@ const Dashboard = () => {
             </div>
 
             {/* Multi-SIG Comparison Chart */}
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl mb-8" style={{ height: '500px' }}>
-                <h3 className="text-lg font-semibold mb-4">多 SIG 趋势对比</h3>
-                <MultiSIGComparisonChart
-                    sigs={comparisonData}
-                    selectedSigIds={selectedSigIds}
-                    onSigSelectionChange={setSelectedSigIds}
-                    range={range}
-                    granularity={granularity}
-                />
+            <div className="flex h-[500px] flex-col rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-xl mb-8">
+                <h3 className="mb-4 shrink-0 text-lg font-semibold">多 SIG 趋势对比</h3>
+                <div className="min-h-0 flex-1">
+                    <MultiSIGComparisonChart
+                        sigs={comparisonData}
+                        selectedSigIds={selectedSigIds}
+                    />
+                </div>
             </div>
 
             {/* Secondary Charts Grid */}
@@ -389,6 +397,9 @@ const Dashboard = () => {
                 </div>
             </div>
 
+            {/* Repository-level analysis follows the SIG overview */}
+            <RepositoryInsights range={range} sigs={allSigs} refreshToken={repositoryRefreshToken} />
+
             {/* Contributor Section */}
             <div className="mb-8">
                 <h2 className="text-2xl font-bold mb-6 text-white">贡献者分析</h2>
@@ -422,12 +433,69 @@ const Dashboard = () => {
 };
 
 const ScopeStat = ({ label, value, unit }) => (
-    <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-        <div className="text-xl font-bold text-white md:text-2xl">{value?.toLocaleString() ?? '—'}</div>
-        <div className="mt-1 text-xs text-gray-400">{label}</div>
-        <div className="text-[11px] text-gray-500">{unit}</div>
+    <div className="rounded-lg border border-white/10 bg-white/5 p-3 md:p-4">
+        <div className="text-xs font-medium text-gray-300 md:text-sm">{label}</div>
+        <div className="mt-2 flex items-baseline gap-1.5">
+            <span className="text-2xl font-bold text-white md:text-3xl">{value?.toLocaleString() ?? '—'}</span>
+            <span className="text-xs text-gray-500">{unit}</span>
+        </div>
     </div>
 );
+
+const DATA_UPDATED_AT_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+});
+const DATA_FRESHNESS_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+const DataFreshness = ({ lastUpdatedAt, status }) => {
+    const [currentTime, setCurrentTime] = useState(() => Date.now());
+    const timestamp = lastUpdatedAt ? new Date(lastUpdatedAt) : null;
+    const hasValidTimestamp = timestamp && !Number.isNaN(timestamp.getTime());
+    const displayTime = hasValidTimestamp ? DATA_UPDATED_AT_FORMATTER.format(timestamp) : null;
+    const staleAt = hasValidTimestamp ? timestamp.getTime() + DATA_FRESHNESS_THRESHOLD_MS : null;
+    const isStale = status === 'stale' || (staleAt !== null && currentTime > staleAt);
+    const label = isStale ? '数据可能延迟，更新于' : '数据更新于';
+
+    useEffect(() => {
+        if (staleAt === null || currentTime > staleAt) {
+            return undefined;
+        }
+
+        const timerId = window.setTimeout(
+            () => setCurrentTime(Date.now()),
+            Math.min(staleAt - Date.now() + 1, MAX_TIMER_DELAY_MS),
+        );
+
+        return () => window.clearTimeout(timerId);
+    }, [currentTime, staleAt]);
+
+    return (
+        <div
+            className="flex w-full items-center justify-end gap-2 whitespace-nowrap text-xs text-gray-400"
+            title={displayTime ? `最近一次成功生成组织数据快照：${displayTime}（北京时间）` : '当前没有可用的数据更新时间'}
+        >
+            <span
+                className={`h-2 w-2 rounded-full ${displayTime ? (isStale ? 'bg-amber-400' : 'bg-emerald-400') : 'bg-gray-500'}`}
+                aria-hidden="true"
+            />
+            {displayTime ? (
+                <span>
+                    {label}{' '}
+                    <time dateTime={lastUpdatedAt} className={isStale ? 'text-amber-300' : 'text-gray-300'}>
+                        {displayTime}
+                    </time>
+                </span>
+            ) : <span>暂无数据更新时间</span>}
+        </div>
+    );
+};
 
 const SummaryCard = ({ title, value, icon, color, subtext }) => {
     const colorClasses = {

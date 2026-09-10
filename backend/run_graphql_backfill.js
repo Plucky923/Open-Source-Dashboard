@@ -26,7 +26,7 @@ const {
     DEFAULT_PROPERTY_NAME,
     syncRepositorySigsFromGitHub,
 } = require('./repository_sig_sync');
-const { syncUpstreamOrgRepositories } = require('./upstream_repository_sync');
+const { syncAssociatedOrgRepositories } = require('./associated_repository_sync');
 const { runPromisesWithConcurrency } = require('./promise_concurrency');
 const {
     MAX_RATE_LIMIT_RETRIES,
@@ -606,19 +606,19 @@ async function runGraphQLBackfillForRange({ startDate, endDate, progressFile = P
             `${syncResult.changes.length} changed.`
         );
 
-        const upstreamSyncResult = await syncUpstreamOrgRepositories({
+        const associatedSyncResult = await syncAssociatedOrgRepositories({
             pool,
             githubToken: GITHUB_TOKEN,
             orgName: ORG_NAME,
         });
         console.log(
-            `[Upstream Org Sync] ${upstreamSyncResult.configurations} organization(s), ` +
-            `${upstreamSyncResult.repositories} repositories: ` +
-            `${upstreamSyncResult.created} created, ${upstreamSyncResult.disabled} disabled, ` +
-            `${upstreamSyncResult.changes.length} changed.`
+            `[Associated Org Sync] ${associatedSyncResult.configurations} organization(s), ` +
+            `${associatedSyncResult.repositories} repositories: ` +
+            `${associatedSyncResult.created} created, ${associatedSyncResult.disabled} disabled, ` +
+            `${associatedSyncResult.changes.length} changed.`
         );
 
-        if (syncResult.changes.length > 0 || upstreamSyncResult.changes.length > 0) {
+        if (syncResult.changes.length > 0 || associatedSyncResult.changes.length > 0) {
             if (!redisClient.isOpen) {
                 await redisClient.connect();
             }

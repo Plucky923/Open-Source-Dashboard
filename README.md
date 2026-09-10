@@ -1,466 +1,103 @@
 # 开源活动仪表板
 
-一个用于监控和可视化 GitHub Organization 活动的数据仪表板系统。
+面向 GitHub Organization 的开源活动数据采集与可视化系统。项目按“组织 → SIG → 仓库 → 贡献者”组织数据，帮助社区观察协作趋势、活跃项目和贡献者参与情况。
 
-## 主要功能
+- 在线站点：[osd.openatom.club](https://osd.openatom.club/)
+- 俱乐部主页：[hust.openatom.club](https://hust.openatom.club/)
 
-### 数据采集与分析
+## 核心能力
 
-- **双管道数据采集**：Git 提交统计 + GitHub API 数据采集
-- **三级数据模型**：仓库 -> SIG -> 组织，支持灵活查询和聚合
-- **贡献者追踪**：贡献者统计、排行榜、新贡献者识别
-
-### 数据可视化
-
-- **组织总览卡片**：展示 PR、Issue、Commit、代码行数等活动快照
-- **趋势图表**：使用 ECharts 展示多维度活动趋势
-- **多 SIG 趋势对比**：支持同时选择多个 SIG 进行对比
-- **贡献者排行榜**：展示头像、用户名、活跃天数与贡献统计
-
-### 高级分析能力
-
-- **日 / 周 / 月视图切换**：支持不同粒度的数据聚合查看
-- **增长分析报告**：支持多维指标的环比分析
-- **数据导出**：支持 CSV、Excel、PDF 三种格式
-
-### 用户体验
-
-- 加载骨架屏、错误边界、Toast 通知
-- Redis 缓存加速
-- 响应式设计
+- 通过 GitHub GraphQL 和 REST API 采集默认分支 Commit、PR、Issue 与贡献者数据
+- 按组织、SIG 和仓库三级聚合活动指标，支持日、周、月粒度与时间范围切换
+- 展示趋势、增长分析、SIG 对比、活跃仓库和贡献者排行榜
+- 使用 GitHub Repository Custom Property `osd_sig` 管理仓库与 SIG 的归属关系
+- 提供数据更新时间状态，以及 CSV、Excel、PDF 导出
+- 使用 PostgreSQL 持久化数据、Redis 缓存查询，并通过 Docker Compose 编排服务
 
 ## 界面预览
 
-以下截图来自前端部署后的实际页面，默认展示 `30d` 时间范围与 `日视图` 粒度。
+截图来自实际部署页面，展示默认 `30d` 时间范围与日视图。
 
-### 30 天增长趋势分析
+### 30 天增长趋势
 
-![30天增长趋势分析](docs/images/dashboard-growth-30d.png)
+![30 天增长趋势](docs/images/dashboard-growth-30d.png)
 
-### 日视图趋势分析
+### 活动趋势与 SIG 对比
 
-下图包含 `Contribution Trends (PRs & Issues) - 日视图`、`Code Activity (Commits) - 日视图` 和 `SIG 对比 - PRs` 三个核心趋势图。
-
-![日视图趋势分析](docs/images/dashboard-trends-day.png)
+![活动趋势与 SIG 对比](docs/images/dashboard-trends-day.png)
 
 ### 贡献者排行榜
 
 ![贡献者排行榜](docs/images/dashboard-contributor-leaderboard.png)
 
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| 后端 | Node.js + Express.js |
-| 数据库 | PostgreSQL |
-| 缓存 | Redis |
-| 调度 | node-cron |
-| 前端 | React + Vite |
-| 可视化 | ECharts |
-| Commit 统计 | GitHub GraphQL 默认分支历史 |
-
-## 目录结构
-
-```text
-oss-dashboard/
-├── .env.docker.example         # Docker Compose 环境变量示例
-├── backend/                    # Node.js/Express 后端服务
-│   ├── server.js               # 主服务器文件
-│   ├── run_graphql_backfill.js # 数据回填脚本
-│   ├── backfill_date_range.js  # 按单日/日期范围定点回填脚本
-│   ├── repository_sig_sync.js  # GitHub Custom Property 同步逻辑
-│   ├── sync_repository_sigs.js # 仓库与 SIG 关系同步命令
-│   ├── run_reaggregation.js    # 重聚合脚本
-│   ├── Dockerfile              # 后端镜像构建文件
-│   └── .env.local.example      # 本机后端环境变量示例
-├── frontend/                   # React/Vite 前端应用
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── components/
-│   │   └── services/
-│   ├── Dockerfile              # 前端镜像构建文件
-│   ├── nginx.conf              # 前端 Nginx 反向代理配置
-│   └── vite.config.js
-├── db/                         # 数据库脚本
-│   ├── schema.sql
-│   ├── seed.sql
-│   ├── contributors_schema.sql
-│   ├── views.sql
-│   ├── migrations/             # 已有数据库升级脚本
-│   └── init/                   # PostgreSQL 容器初始化入口脚本
-└── docker-compose.yml          # Docker Compose 编排文件
-```
-
-## 环境要求
-
-本项目支持两种运行方式：
-
-- **Docker Compose 部署**
-  - Docker Engine
-  - Docker Compose
-- **本机开发启动**
-  - Node.js 20+
-  - PostgreSQL
-  - Redis
-
 ## 快速开始
 
-### 1. Docker Compose 快速开始
-
-#### 1.1 准备根目录环境变量
+需要 Docker Engine 和 Docker Compose。
 
 ```bash
 cp .env.docker.example .env
 ```
 
-Windows PowerShell 可使用：
-
-```powershell
-Copy-Item .env.docker.example .env
-```
-
-编辑根目录 `.env`，至少填写：
+编辑 `.env`，至少设置：
 
 ```env
 GITHUB_TOKEN=YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
 POSTGRES_PASSWORD=your_postgres_password
 ```
 
-如需调整对外端口，可同时修改：
-
-```env
-BACKEND_PORT=3000
-FRONTEND_PORT=8080
-```
-
-> 根目录 `.env.docker.example` 是给 `docker compose` 使用的。  
-> 如果你要走本机 `npm start` 模式，请使用 `backend/.env.local.example`。
-
-#### 1.2 启动全部服务
+启动服务：
 
 ```bash
 docker compose up -d --build
+docker compose ps
 ```
 
-启动后默认访问地址：
+默认访问地址：
 
 - 前端：`http://localhost:8080`
 - 后端：`http://localhost:3000`
 
-#### 1.3 检查服务状态
-
-```bash
-docker compose ps
-docker compose logs postgres
-docker compose logs backend
-docker compose logs frontend
-```
-
-#### 1.4 验证接口
-
-```bash
-curl http://localhost:3000/api/v1/organization/sigs
-curl http://localhost:8080/api/v1/organization/sigs
-```
-
-#### 1.5 手动回填数据
-
-默认情况下，容器启动时不会自动执行历史数据回填。
-
-如果页面可以打开，但图表和贡献数据为空，请手动执行：
+首次启动不会自动回填历史数据。如果页面暂无图表数据，可执行：
 
 ```bash
 docker compose exec backend node run_graphql_backfill.js 30
 ```
 
-如需回填结束后同步清空 Redis，可执行：
+完整的 Docker、本机开发和数据库初始化步骤见[快速开始](docs/getting-started.md)。
 
-```bash
-docker compose exec backend node run_graphql_backfill.js 30 --flush-cache
-```
+## 文档
 
-#### 1.6 停止与销毁测试环境
+| 文档 | 内容 |
+|------|------|
+| [文档导航](docs/README.md) | 全部文档入口 |
+| [快速开始](docs/getting-started.md) | Docker Compose、本机开发和数据库初始化 |
+| [界面导览](docs/screenshots.md) | 组织概览、趋势、仓库洞察和贡献者界面 |
+| [架构与数据口径](docs/architecture.md) | 技术栈、数据链路、仓库归属和统计规则 |
+| [API 参考](docs/api.md) | 组织、SIG、仓库、贡献者和导出接口 |
+| [运行与维护](docs/operations.md) | 迁移、回填、重聚合、缓存和故障排查 |
 
-只停止并删除容器、网络，保留卷数据：
+## 开发验证
 
-```bash
-docker compose down
-```
-
-彻底删除测试环境，包括数据库、Redis、`repos` 卷和本地构建镜像：
-
-```bash
-docker compose down -v --rmi local
-```
-
-### 2. 本机开发启动
-
-如果你要本机单独启动前后端，而不是使用 Docker，请按下面方式操作。
-
-#### 2.1 初始化数据库
-
-```bash
-createdb oss_dashboard
-psql -d oss_dashboard -f db/schema.sql
-psql -d oss_dashboard -f db/seed.sql
-psql -d oss_dashboard -f db/contributors_schema.sql
-```
-
-不使用 Docker Compose、从旧版本升级已有数据库时，按顺序执行迁移：
-
-```bash
-psql -d oss_dashboard -f db/migrations/001_github_custom_property_sigs.sql
-psql -d oss_dashboard -f db/migrations/002_repository_organization_membership.sql
-```
-
-执行 `002` 后需启动后端或运行 `npm run sync-repository-sigs`，以 GitHub 当前仓库列表更新组织成员状态。
-
-如需启用可选物化视图：
-
-```bash
-psql -d oss_dashboard -f db/views.sql
-```
-
-#### 2.2 配置并启动后端
+后端：
 
 ```bash
 cd backend
-cp .env.local.example .env
 npm install
-npm start
+npm test
 ```
 
-Windows PowerShell 可使用：
-
-```powershell
-cd backend
-Copy-Item .env.local.example .env
-npm install
-npm start
-```
-
-需要在 `backend/.env` 中配置数据库、Redis 与 GitHub Token。
-
-默认情况下，后端服务启动时不会自动清空 Redis，也不会自动执行历史数据回填。
-
-如需启用这些启动行为，可在 `backend/.env` 中显式配置：
-
-```env
-ENABLE_STARTUP_CACHE_FLUSH=true
-ENABLE_STARTUP_BACKFILL=true
-STARTUP_BACKFILL_DAYS=30
-```
-
-#### 2.3 启动前端
+前端：
 
 ```bash
 cd frontend
 npm install
-npm run dev
-```
-
-启动后请按 Vite 终端输出的本地访问地址打开仪表板。
-
-## 常用命令
-
-### Docker Compose
-
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs migrate
-docker compose logs backend
-docker compose logs frontend
-docker compose logs postgres
-docker compose exec backend npm run sync-repository-sigs
-docker compose exec backend node run_graphql_backfill.js 30
-docker compose exec backend node run_graphql_backfill.js 30 --flush-cache
-docker compose down
-docker compose down -v --rmi local
-```
-
-Compose 会在 backend 启动前运行一次性 `migrate` 服务；迁移失败时 backend 不会启动。该服务会按文件名顺序执行 `db/migrations/*.sql`，已有迁移可安全重复执行。
-
-### 后端
-
-```bash
-cd backend
-npm install
-npm start
-npm run sync-repository-sigs
-node run_graphql_backfill.js 30
-node run_graphql_backfill.js 30 --flush-cache
-node backfill_date_range.js --date 2026-03-12
-node backfill_date_range.js --start-date 2026-03-12 --end-date 2026-03-14
-node backfill_date_range.js --date 2026-03-31 --reset-existing --flush-cache
-node run_reaggregation.js
-node run_reaggregation.js --flush-cache
-node backfill_single_repo.js <repo-name>
-```
-
-### 前端
-
-```bash
-cd frontend
-npm install
-npm run dev
-npm run build
-npm run preview
 npm run lint
+npm run build
 ```
 
-## API 概览
+## 重要约定
 
-### 核心接口
-
-| 接口 | 描述 |
-|------|------|
-| `GET /api/v1/organization/sigs` | 获取所有 SIG 列表 |
-| `GET /api/v1/organization/timeseries` | 获取组织时间序列数据 |
-| `GET /api/v1/sig/:sigId/timeseries` | 获取 SIG 时间序列数据 |
-| `GET /api/v1/organization/latest-activity` | 获取最新活动列表 |
-
-### 分析接口
-
-| 接口 | 描述 |
-|------|------|
-| `GET /api/v1/organization/timeseries/aggregated` | 获取组织聚合时间序列 |
-| `GET /api/v1/sig/:sigId/timeseries/aggregated` | 获取 SIG 聚合时间序列 |
-| `GET /api/v1/sigs/compare` | 获取多 SIG 对比数据 |
-| `GET /api/v1/organization/growth-analysis` | 获取组织增长分析 |
-| `GET /api/v1/sig/:sigId/growth-analysis` | 获取 SIG 增长分析 |
-
-### 贡献者接口
-
-| 接口 | 描述 |
-|------|------|
-| `GET /api/v1/contributors/leaderboard` | 贡献者排行榜 |
-| `GET /api/v1/contributors/stats` | 贡献者统计概览 |
-| `GET /api/v1/contributors/:username` | 贡献者详情 |
-
-### 导出接口
-
-| 接口 | 描述 |
-|------|------|
-| `GET /api/v1/export/csv` | 导出 CSV |
-| `GET /api/v1/export/excel` | 导出 Excel |
-| `POST /api/v1/export/pdf` | 导出 PDF |
-
-## 数据更新说明
-
-- **仓库归属**：以 GitHub 组织仓库的 `osd_sig` Custom Property 为唯一来源，不再维护仓库映射文件
-- **属性同步**：后端启动、定时采集和回填前都会完整读取并同步 `osd_sig`
-- **排除状态**：`osd_sig=untracked` 的仓库保留原始历史快照，但不参与后续采集和 SIG/组织聚合
-- **组织成员状态**：删除或转移出 GitHub 组织的仓库保留历史数据，但不再计入当前组织仓库数
-- **稳定身份**：数据库保存 GitHub `repository_id`，仓库重命名时沿用原记录和全部历史数据
-- **历史迁移**：仓库切换 SIG 或切换到/离开 `untracked` 时，会按当前归属重新聚合已有历史快照和贡献者汇总
-- **自动更新**：后端服务默认每 6 小时自动采集一次新数据
-- **手动回填**：使用 `backend/run_graphql_backfill.js`
-- **定点回填**：使用 `backend/backfill_date_range.js` 按单天或自定义日期范围修复数据
-- **重聚合**：使用 `backend/run_reaggregation.js`
-
-Commit 数量、增删行和作者统计均来自 GitHub GraphQL 的默认分支历史。历史回填按仓库分页获取指定日期范围，再在本地按日期归档；后端不会 clone 或持久化组织仓库。
-
-**关联组织跟踪**：
-
-- 仪表盘组织（`hust-open-atom-club`）之外的仓库无法携带本组织的 `osd_sig` 属性，通过 `upstream_org_trackings` 表配置关联组织（预置 `rustsbi`）：同步时在这些组织的仓库中**搜索 osd_sig 声明**——即 GitHub topic `osd-sig-<sig-slug>`（如 `osd-sig-r2`），携带该 topic 的仓库归入对应 SIG，与每日 `osd_sig` 同步一起执行。
-- 未携带 `osd-sig-*` topic 的仓库不会被跟踪；仓库移除 topic 或从组织中删除时停止跟踪，历史保留不丢。
-- commit 统计与其他仓库一致，仅取**默认分支**，不区分主仓库与普通仓库。
-- 上游仓库在 `repositories` 表中以 `owner_login` 区分；同名仓库（如 club 的 fork 与上游同名仓库）可共存，唯一约束为 `(org_id, owner_login, name)`。
-- 跟踪上游后，需将 club 内同名 fork（如 `hust-open-atom-club/rustsbi`）的 `osd_sig` 设为 `untracked`，并为需要跟踪的上游仓库（如 `rustsbi/rustsbi`）添加 topic `osd-sig-r2`，避免双计。
-- 回填上游仓库：`node backfill_single_repo.js <repo-name> <owner>`，例如 `node backfill_single_repo.js rustsbi rustsbi`。
-
-注意：
-
-- `GITHUB_TOKEN` 必须能够读取组织仓库及 Repository Custom Properties
-- 同步会严格分页；属性缺失、重复或出现后端不认识的 `osd_sig` 枚举时会整体失败，不会部分更新数据库
-- 可用 `npm run sync-repository-sigs` 手动同步并在关系变化后清空 Redis
-- 默认情况下，服务启动时不会自动触发历史数据回填
-- 如需在启动时自动回填，可通过环境变量 `ENABLE_STARTUP_BACKFILL=true` 显式开启
-- 可通过 `STARTUP_BACKFILL_DAYS` 控制启动回填天数，默认值为 `30`
-- 默认情况下，服务启动时不会自动清空 Redis
-- 如需在启动时清空 Redis，可通过环境变量 `ENABLE_STARTUP_CACHE_FLUSH=true` 显式开启
-- 默认情况下，`backend/run_graphql_backfill.js` 在回填结束后不会自动清空 Redis
-- 如需在回填完成后清空 Redis，可显式传入 `--flush-cache`
-- 示例：`node run_graphql_backfill.js 30 --flush-cache`
-- `backend/backfill_date_range.js` 支持 `--date YYYY-MM-DD` 和 `--start-date YYYY-MM-DD --end-date YYYY-MM-DD`
-- 如需在定点回填前先删除目标日期范围内已有数据，可追加 `--reset-existing`
-- 如需在定点回填完成后同步清空 Redis，可追加 `--flush-cache`
-- 示例：`node backfill_date_range.js --date 2026-03-31 --reset-existing --flush-cache`
-- 默认情况下，`backend/run_reaggregation.js` 在重聚合结束后不会自动清空 Redis
-- 如需在重聚合完成后清空 Redis，可显式传入 `--flush-cache`
-- 示例：`node run_reaggregation.js --flush-cache`
-- 数据回填可能持续较长时间，取决于仓库数量与 GitHub API 限流情况
-- 在共享环境中操作缓存和回填脚本前，建议先确认影响范围
-
-## 故障排查
-
-### 前端没有数据显示
-
-1. 检查数据库中是否已有聚合数据：
-
-```bash
-psql -d oss_dashboard -c "SELECT COUNT(*) FROM activity_snapshots;"
-```
-
-2. 如果是通过 Docker Compose 启动，默认不会自动回填历史数据。页面能打开但无图表数据时，优先执行：
-
-```bash
-docker compose exec backend node run_graphql_backfill.js 30
-```
-
-3. 检查后端与 Redis 是否正常连接
-4. 硬刷新浏览器：`Ctrl+Shift+R`
-
-### 贡献者数据为空
-
-1. 确认贡献者相关表已创建：
-
-```bash
-psql -d oss_dashboard -c "\dt contributors"
-```
-
-2. 运行回填脚本：
-
-```bash
-cd backend
-node run_graphql_backfill.js 30
-```
-
-如需在回填结束后同步清空 Redis，可改用：
-
-```bash
-cd backend
-node run_graphql_backfill.js 30 --flush-cache
-```
-
-如果只有少数日期异常，优先使用定点回填脚本：
-
-```bash
-cd backend
-node backfill_date_range.js --date 2026-03-12 --reset-existing
-node backfill_date_range.js --start-date 2026-03-12 --end-date 2026-03-14 --reset-existing --flush-cache
-```
-
-### 遇到 GitHub API 限流
-
-- 等待额度恢复后重试
-- 如果只需要修复少数异常日期，优先使用 `backfill_date_range.js` 缩小回填范围
-- 适当减少回填天数，例如：
-
-```bash
-cd backend
-node run_graphql_backfill.js 7
-```
-
-## 安全与配置
-
-- 不要提交任何密钥、Token、数据库密码或本地 `.env` 文件
-- 建议通过环境变量管理 `GITHUB_TOKEN`、数据库连接和 Redis 配置
-- 如果在服务器或共享环境中部署，请限制 Redis 和数据库访问范围
-- 运行回填、重聚合、导出等脚本前，建议先确认目标环境与数据影响范围
-
-## 备注
-
-- 当前 README 主要面向快速了解项目与本地启动
-- 更细的运行机制、数据链路和维护说明可以在后续单独拆分到专门文档
+- `osd_sig` 是仓库 SIG 归属的唯一来源；值为 `untracked` 的仓库不参与后续采集和组织/SIG 聚合。
+- Commit 总数与代码行统计来自 GitHub 默认分支历史。Bot 提交属于仓库活动，但 Bot 账号不计入人类贡献者指标。
+- 服务启动时默认不清空 Redis，也不自动回填历史数据；高影响操作需要显式启用。
+- 不要提交 Token、数据库密码、本地 `.env` 或其他凭据。

@@ -388,7 +388,7 @@ test('database synchronization rolls back when a write fails', async () => {
     assert.equal(commands.at(-1), 'RELEASE');
 });
 
-test('property synchronization leaves upstream-owned rows untouched', async () => {
+test('property synchronization leaves associated-org-owned rows untouched', async () => {
     const queries = [];
     const sigIds = new Map(Object.keys(SIG_DEFINITIONS).map((slug, index) => [slug, 100 + index]));
     const client = {
@@ -408,9 +408,9 @@ test('property synchronization leaves upstream-owned rows untouched', async () =
             if (compact.startsWith('SELECT r.id, r.github_id')) {
                 return {
                     rows: [
-                        // A club row sharing its name with an upstream row must
-                        // not trip the duplicate-name check: uniqueness is now
-                        // scoped by owner_login.
+                        // A club row sharing its name with an associated-org
+                        // row must not trip the duplicate-name check: uniqueness
+                        // is now scoped by owner_login.
                         { id: 10, github_id: null, name: 'example', sig_id: null, sig_slug: null, is_in_organization: true, owner_login: 'hust-open-atom-club' },
                         { id: 15, github_id: '305', name: 'Example', sig_id: sigIds.get('r2'), sig_slug: 'r2', is_in_organization: false, owner_login: 'rustsbi' },
                     ],
@@ -436,8 +436,8 @@ test('property synchronization leaves upstream-owned rows untouched', async () =
     assert.equal(result.disabled, 0);
     assert.deepEqual(result.changes.map((change) => change.repository), ['new-repo']);
 
-    // The upstream row (id 15) is absent from the Custom Property listing but
-    // must never be disabled by the club-org synchronization.
+    // The associated-org row (id 15) is absent from the Custom Property
+    // listing but must never be disabled by the club-org synchronization.
     assert.ok(!queries.some((query) =>
         query.sql === 'UPDATE repositories SET sig_id = NULL, is_in_organization = FALSE WHERE id = $1'
         && query.params[0] === 15

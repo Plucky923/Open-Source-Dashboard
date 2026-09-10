@@ -9,7 +9,7 @@ const {
     DEFAULT_PROPERTY_NAME,
     syncRepositorySigsFromGitHub,
 } = require('./repository_sig_sync');
-const { syncUpstreamOrgRepositories } = require('./upstream_repository_sync');
+const { syncAssociatedOrgRepositories } = require('./associated_repository_sync');
 const { persistRepoCommitStats } = require('./commit_author_stats');
 const { collectAndPersistRepoApiStats } = require('./repo_api_ingestion');
 
@@ -198,7 +198,7 @@ async function backfillSingleRepository(repoName, ownerLogin = ORG_NAME, days = 
         orgName: ORG_NAME,
         propertyName: process.env.GITHUB_SIG_PROPERTY || DEFAULT_PROPERTY_NAME,
     });
-    await syncUpstreamOrgRepositories({
+    await syncAssociatedOrgRepositories({
         pool,
         githubToken: GITHUB_TOKEN,
         orgName: ORG_NAME,
@@ -213,7 +213,7 @@ async function backfillSingleRepository(repoName, ownerLogin = ORG_NAME, days = 
         [ORG_NAME, repoName, ownerLogin]
     );
     if (repoResult.rows.length === 0) {
-        throw new Error(`Repository "${ownerLogin}/${repoName}" is missing or untracked. (Upstream repositories require their owner as the second argument.)`);
+        throw new Error(`Repository "${ownerLogin}/${repoName}" is missing or untracked. (Repositories outside ${ORG_NAME} need their GitHub owner as the second argument, e.g. rustsbi.)`);
     }
     const repoId = repoResult.rows[0].id;
     console.log(`Found repository in DB with ID: ${repoId}`);
@@ -251,8 +251,8 @@ async function backfillSingleRepository(repoName, ownerLogin = ORG_NAME, days = 
 
 // --- 脚本入口 ---
 // 用法: node backfill_single_repo.js <repository-name> [owner] [days]
-// owner 缺省为 hust-open-atom-club；回填上游仓库时传入其 GitHub owner，
-// 例如: node backfill_single_repo.js rustsbi rustsbi
+// owner 缺省为 hust-open-atom-club；回填关联组织（如 rustsbi）的仓库时传入
+// 其 GitHub owner，例如: node backfill_single_repo.js rustsbi rustsbi
 const repoToBackfill = process.argv[2];
 const ownerArg = process.argv[3];
 const daysArg = process.argv[4];

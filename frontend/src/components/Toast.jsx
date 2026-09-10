@@ -79,21 +79,4 @@ export const ToastContainer = ({ toasts, removeToast }) => {
     );
 };
 
-// Custom hook for managing toasts
-export const useToast = () => {
-    const [toasts, setToasts] = React.useState([]);
-
-    const addToast = (message, type = 'success', duration = 3000) => {
-        const id = Date.now();
-        setToasts(prev => [...prev, { id, message, type, duration }]);
-    };
-
-    const removeToast = (id) => {
-        setToasts(prev => prev.filter(toast => toast.id !== id));
-    };
-
-    return { toasts, addToast, removeToast };
-};
-
 export default Toast;
-

@@ -3,7 +3,7 @@ import ReactECharts from 'echarts-for-react';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
-const MultiSIGComparisonChart = ({ sigs, selectedSigIds, onSigSelectionChange, metric = 'new_prs', range, granularity }) => {
+const MultiSIGComparisonChart = ({ sigs, selectedSigIds, metric = 'new_prs' }) => {
     const [chartData, setChartData] = useState([]);
 
     useEffect(() => {
